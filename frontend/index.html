@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVR // Article Archive</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&display=swap" rel="stylesheet">
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiQXJ0aWNsZSBBcmNoaXZlIiwic2hvcnRfbmFtZSI6IlNWUiIsInN0YXJ0X3VybCI6Ii8iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3IiOiIjMGYwZjEyIiwidGhlbWVfY29sb3IiOiIjMDBmM2ZmIn0=">
+    <meta name="theme-color" content="#0f0f12">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        obsidian: '#0f0f12',
+                        cardbg: '#16161a',
+                        cyan: '#00f3ff',
+                        dim: '#888890',
+                        border: '#2a2a30',
+                        reader: '#e0e0e0'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                        serif: ['Merriweather', 'serif']
+                    },
+                    boxShadow: {
+                        'neon': '0 0 5px rgba(0, 243, 255, 0.2), 0 0 10px rgba(0, 243, 255, 0.1)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0f0f12; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #00f3ff; }
+
+        /* Reading Progress Bar */
+        #progress-bar { transition: width 0.1s ease; }
+
+        /* Smooth Transitions */
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Typography for Reader */
+        .prose-custom p { margin-bottom: 1.8em; line-height: 1.9; color: #d4d4d8; font-size: 1.125rem; }
+        .prose-custom h3 { color: #fff; font-weight: 700; margin-top: 2.5em; margin-bottom: 1em; font-size: 1.5em; letter-spacing: -0.02em; font-family: 'Inter', sans-serif; }
+        .prose-custom blockquote { border-left: 3px solid #00f3ff; padding-left: 1.5rem; margin: 2rem 0; font-style: italic; color: #a1a1aa; font-size: 1.2rem; background: rgba(255,255,255,0.02); padding: 1.5rem; border-radius: 0 4px 4px 0; }
+        .prose-custom ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1.5rem; color: #d4d4d8; }
+        .prose-custom li { margin-bottom: 0.5rem; }
+
+        /* Loading Spinner */
+        .loader { border: 2px solid #333; border-top: 2px solid #00f3ff; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-obsidian text-gray-300 min-h-screen font-sans antialiased selection:bg-cyan selection:text-black overflow-x-hidden">
+
+    <!-- GLOBAL HEADER -->
+    <header class="fixed top-0 w-full bg-obsidian/90 backdrop-blur-md border-b border-border z-40 h-16 flex items-center justify-between px-6 lg:px-12">
+        <div class="flex items-center space-x-3 group cursor-pointer" onclick="app.goHome()">
+            <div class="w-2 h-6 bg-cyan group-hover:shadow-neon transition-shadow"></div>
+            <h1 class="font-mono font-bold text-lg tracking-widest text-white">SVR<span class="text-dim text-sm font-normal ml-2 hidden sm:inline">// ARCHIVE_NODE</span></h1>
+        </div>
+
+        <div class="flex items-center space-x-6">
+            <div id="status-indicator" class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_10px_#22c55e]" title="Connected"></div>
+            <button onclick="app.openBookmarkletModal()" class="flex items-center space-x-2 border border-border px-4 py-1.5 rounded hover:border-cyan hover:text-cyan transition-colors text-sm font-mono group">
+                <i class="fa-solid fa-bookmark text-xs"></i>
+                <span>BOOKMARKLET</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT CONTAINER -->
+    <main class="pt-24 pb-12 px-6 lg:px-12 max-w-7xl mx-auto min-h-screen relative">
+
+        <!-- VIEW: LIBRARY -->
+        <section id="view-library" class="fade-in block">
+            <!-- Filter Bar -->
+            <div class="flex justify-between items-end mb-8 border-b border-border pb-2">
+                <div class="flex space-x-6 font-mono text-xs tracking-wider">
+                    <button class="text-cyan border-b border-cyan pb-2 -mb-2.5">ALL_DATA</button>
+                </div>
+                <div class="font-mono text-xs text-dim">
+                    <span id="article-count">0</span> RECORDS FOUND
+                </div>
+            </div>
+
+            <!-- Grid -->
+            <div id="article-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
+                <div class="col-span-full flex flex-col items-center justify-center py-20 opacity-50">
+                    <div class="loader mb-4"></div>
+                    <p class="font-mono text-xs">LOADING ARCHIVE...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW: READER -->
+        <section id="view-reader" class="hidden fade-in">
+            <!-- Reading Progress Bar -->
+            <div class="fixed top-[64px] left-0 h-[2px] bg-cyan shadow-neon z-50 w-0" id="progress-bar"></div>
+
+            <div class="max-w-3xl mx-auto">
+                <!-- Reader Nav -->
+                <button onclick="app.goHome()" class="group flex items-center space-x-2 text-dim hover:text-cyan mb-8 font-mono text-xs transition-colors">
+                    <i class="fa-solid fa-arrow-left group-hover:-translate-x-1 transition-transform"></i>
+                    <span>RETURN TO GRID</span>
+                </button>
+
+                <!-- Article Header -->
+                <header class="mb-12 border-b border-border pb-8">
+                    <div class="flex items-center space-x-3 mb-4 font-mono text-xs text-dim tracking-wider uppercase">
+                        <span id="reader-source" class="text-cyan">SOURCE</span>
+                        <span>//</span>
+                        <span id="reader-author">AUTHOR</span>
+                        <span class="mx-2">|</span>
+                        <span id="reader-date">DATE</span>
+                    </div>
+                    <h1 id="reader-title" class="text-3xl md:text-5xl font-bold text-white leading-tight mb-6 font-sans">
+                        Article Title
+                    </h1>
+                    <div class="flex items-center space-x-2 font-mono text-xs text-dim">
+                        <span class="bg-cardbg px-2 py-1 rounded border border-border" id="reader-time">5m READ</span>
+                    </div>
+                </header>
+
+                <!-- Article Content -->
+                <article id="reader-content" class="prose-custom text-lg font-serif">
+                    <!-- Content injected here -->
+                </article>
+
+                <!-- Reader Footer -->
+                <div class="mt-16 pt-8 border-t border-border flex justify-between items-center">
+                    <button onclick="window.scrollTo({top: 0, behavior: 'smooth'})" class="text-dim hover:text-white font-mono text-xs">
+                        [ SCROLL TO TOP ]
+                    </button>
+                    <div class="flex space-x-4">
+                        <button onclick="app.deleteCurrent()" class="text-dim hover:text-red-500 font-mono text-xs">DELETE</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- MODAL: BOOKMARKLET -->
+    <div id="modal-bookmarklet" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-cardbg border border-border w-full max-w-2xl p-6 rounded shadow-2xl relative">
+            <button onclick="app.closeBookmarkletModal()" class="absolute top-4 right-4 text-dim hover:text-white">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+            <h2 class="font-mono text-lg text-white mb-6 flex items-center">
+                <i class="fa-solid fa-bookmark mr-3 text-cyan"></i> ARTICLE SAVER BOOKMARKLET
+            </h2>
+
+            <div class="space-y-4 text-sm text-gray-300">
+                <p>Drag this button to your bookmarks bar:</p>
+
+                <div class="flex justify-center my-6">
+                    <a href="" id="bookmarklet-link" class="inline-block bg-cyan/10 text-cyan px-6 py-3 rounded border border-cyan hover:bg-cyan hover:text-black transition-all font-mono cursor-move">
+                        💾 Save Article
+                    </a>
+                </div>
+
+                <div class="bg-obsidian p-4 rounded border border-border">
+                    <p class="font-mono text-xs text-dim mb-2">HOW TO USE:</p>
+                    <ol class="list-decimal list-inside space-y-2 text-sm">
+                        <li>Visit an article on archive.is</li>
+                        <li>Click the bookmarklet</li>
+                        <li>Article will be saved automatically</li>
+                        <li>Return here to read it</li>
+                    </ol>
+                </div>
+
+                <div class="bg-obsidian p-4 rounded border border-border">
+                    <p class="font-mono text-xs text-dim mb-2">WORKFLOW:</p>
+                    <ol class="list-decimal list-inside space-y-2 text-sm">
+                        <li>Find article you want to save</li>
+                        <li>Submit to archive.is (solve CAPTCHA if needed)</li>
+                        <li>Once archived page loads, click bookmarklet</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // Configuration - will be replaced when deployed to Helios
+        const API_BASE = window.location.origin;
+
+        // State & DOM Elements
+        const state = {
+            articles: [],
+            currentArticleId: null
+        };
+
+        const els = {
+            libraryView: document.getElementById('view-library'),
+            readerView: document.getElementById('view-reader'),
+            articleList: document.getElementById('article-list'),
+            articleCount: document.getElementById('article-count'),
+            bookmarkletModal: document.getElementById('modal-bookmarklet'),
+            statusIndicator: document.getElementById('status-indicator'),
+            progressBar: document.getElementById('progress-bar'),
+            rTitle: document.getElementById('reader-title'),
+            rSource: document.getElementById('reader-source'),
+            rAuthor: document.getElementById('reader-author'),
+            rDate: document.getElementById('reader-date'),
+            rTime: document.getElementById('reader-time'),
+            rContent: document.getElementById('reader-content')
+        };
+
+        // Helper Functions
+        const utils = {
+            formatDate: (timestamp) => {
+                if (!timestamp) return 'UNKNOWN';
+                const date = new Date(timestamp);
+                return date.toISOString().split('T')[0];
+            },
+
+            formatContent: (text) => {
+                // Simple formatter: wrap paragraphs
+                const paragraphs = text.split('\n\n');
+                return paragraphs.map(p => {
+                    p = p.trim();
+                    if (!p) return '';
+                    if (p.startsWith('#')) {
+                        return `<h3>${p.replace(/^#+\s*/, '')}</h3>`;
+                    }
+                    return `<p>${p}</p>`;
+                }).join('');
+            }
+        };
+
+        // App Logic
+        window.app = {
+            init: async () => {
+                // Check server health
+                try {
+                    const response = await fetch(`${API_BASE}/health`);
+                    const data = await response.json();
+                    els.statusIndicator.classList.add('bg-green-500', 'shadow-[0_0_10px_#22c55e]');
+                    els.statusIndicator.classList.remove('bg-red-500');
+                    els.statusIndicator.title = "Connected: " + data.articles_count + " articles";
+                } catch (e) {
+                    els.statusIndicator.classList.add('bg-red-500');
+                    els.statusIndicator.classList.remove('bg-green-500', 'shadow-[0_0_10px_#22c55e]');
+                    els.statusIndicator.title = "Disconnected";
+                }
+
+                // Load articles
+                app.loadArticles();
+
+                // Scroll listener for reader
+                window.addEventListener('scroll', () => {
+                    if (els.readerView.classList.contains('hidden')) return;
+                    const scrollTop = window.scrollY;
+                    const docHeight = document.body.offsetHeight - window.innerHeight;
+                    const scrollPercent = (scrollTop / docHeight) * 100;
+                    els.progressBar.style.width = Math.min(100, Math.max(0, scrollPercent)) + '%';
+                });
+
+                // Generate bookmarklet
+                app.generateBookmarklet();
+            },
+
+            generateBookmarklet: () => {
+                const bookmarkletCode = `
+(function(){
+    const html = document.documentElement.outerHTML;
+    const archiveUrl = window.location.href;
+
+    const loadingDiv = document.createElement('div');
+    loadingDiv.textContent = '💾 Saving article...';
+    loadingDiv.style.cssText = 'position:fixed;top:20px;right:20px;background:#007bff;color:white;padding:15px;border-radius:4px;z-index:999999;font-family:system-ui;box-shadow:0 4px 6px rgba(0,0,0,0.1);';
+    document.body.appendChild(loadingDiv);
+
+    const saveArticle = (forceOverwrite = false) => {
+        fetch('${API_BASE}/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({html: html, archive_url: archiveUrl, force_overwrite: forceOverwrite})
+        })
+        .then(r => {
+            if (r.status === 409) {
+                return r.json().then(data => ({ status: 409, data }));
+            }
+            return r.json().then(data => ({ status: r.status, data }));
+        })
+        .then(response => {
+            const { status, data } = response;
+
+            if (status === 409 && data.duplicate) {
+                loadingDiv.remove();
+                const confirmed = confirm(
+                    'Article already exists:\\n\\n' +
+                    '"' + data.existing_title + '"\\n\\n' +
+                    'Do you want to overwrite it with the latest version?'
+                );
+                if (confirmed) {
+                    loadingDiv.textContent = '🔄 Updating article...';
+                    document.body.appendChild(loadingDiv);
+                    saveArticle(true);
+                }
+                return;
+            }
+
+            loadingDiv.remove();
+            if (data.success) {
+                const resultDiv = document.createElement('div');
+                resultDiv.innerHTML = '<strong>✅ Article Saved!</strong><br><br>' +
+                    '<strong>Title:</strong> ' + data.title + '<br>' +
+                    '<strong>Read time:</strong> ' + (data.read_time || 'N/A');
+                resultDiv.style.cssText = 'position:fixed;top:20px;right:20px;width:400px;background:#d4edda;color:#155724;padding:20px;border-radius:4px;z-index:999999;font-family:system-ui;font-size:13px;box-shadow:0 4px 6px rgba(0,0,0,0.1);';
+
+                const closeBtn = document.createElement('button');
+                closeBtn.textContent = 'Close';
+                closeBtn.style.cssText = 'margin-top:15px;padding:8px 16px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;';
+                closeBtn.onclick = () => resultDiv.remove();
+                resultDiv.appendChild(closeBtn);
+                document.body.appendChild(resultDiv);
+
+                setTimeout(() => resultDiv.remove(), 10000);
+            } else {
+                alert('Error: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(e => {
+            loadingDiv.remove();
+            alert('Error: ' + e.message);
+        });
+    };
+
+    saveArticle();
+})();
+                `.trim();
+
+                const minified = bookmarkletCode.replace(/\s+/g, ' ').replace(/\n/g, '');
+                document.getElementById('bookmarklet-link').href = 'javascript:' + encodeURIComponent(minified);
+            },
+
+            loadArticles: async () => {
+                try {
+                    const response = await fetch(`${API_BASE}/articles`);
+                    const articles = await response.json();
+
+                    state.articles = articles;
+                    app.renderLibrary();
+                } catch (error) {
+                    console.error("Error loading articles:", error);
+                    els.articleList.innerHTML = `<div class="text-red-500 font-mono text-center col-span-full">ERROR LOADING DATA</div>`;
+                }
+            },
+
+            renderLibrary: () => {
+                els.articleCount.textContent = state.articles.length;
+                els.articleList.innerHTML = '';
+
+                if (state.articles.length === 0) {
+                    els.articleList.innerHTML = `
+                        <div class="col-span-full flex flex-col items-center justify-center py-20 border border-dashed border-border rounded text-dim">
+                            <i class="fa-solid fa-folder-open text-4xl mb-4 opacity-50"></i>
+                            <p class="font-mono text-sm mb-4">ARCHIVE EMPTY</p>
+                            <button onclick="app.openBookmarkletModal()" class="text-cyan hover:underline font-mono text-xs">GET BOOKMARKLET</button>
+                        </div>
+                    `;
+                    return;
+                }
+
+                state.articles.forEach(article => {
+                    const card = document.createElement('article');
+                    card.className = "group relative bg-cardbg border border-border rounded p-5 transition-all duration-300 hover:border-cyan hover:shadow-neon cursor-pointer flex flex-col h-full";
+
+                    card.innerHTML = `
+                        <div class="flex justify-between items-start mb-2">
+                            <h2 class="text-lg font-semibold text-gray-100 group-hover:text-white transition-colors leading-tight pr-4 line-clamp-2">
+                                ${article.title}
+                            </h2>
+                            <div class="shrink-0 flex items-center justify-center border border-border rounded px-2 py-1 bg-obsidian">
+                                <span class="font-mono text-xs text-cyan font-bold">${article.readTime || '3m'}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center space-x-2 mb-4 font-mono text-[10px] text-dim tracking-wider uppercase">
+                            <span class="text-cyan truncate max-w-[100px]">${article.source_domain || 'unknown'}</span>
+                            <span>//</span>
+                            <span class="truncate max-w-[100px]">${article.author || 'UNKNOWN'}</span>
+                        </div>
+
+                        <div class="relative flex-grow">
+                             <p class="text-sm text-gray-400 leading-relaxed mb-6 line-clamp-3 border-l-2 border-transparent group-hover:border-cyan pl-0 group-hover:pl-3 transition-all duration-300">
+                                ${article.snippet || "No preview available."}
+                            </p>
+                        </div>
+
+                        <div class="flex justify-between items-center pt-4 border-t border-border group-hover:border-gray-800 transition-colors mt-auto">
+                            <div class="font-mono text-[10px] text-dim">
+                                ${utils.formatDate(article.captured_at)}
+                            </div>
+
+                            <div class="flex space-x-3 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity duration-300 translate-y-0 sm:translate-y-1 group-hover:translate-y-0">
+                                <button onclick="event.stopPropagation(); app.openReader(${article.id})" class="text-xs font-mono font-bold text-dim hover:text-cyan flex items-center transition-colors">
+                                    [ READ ]
+                                </button>
+                                <button onclick="event.stopPropagation(); app.deleteArticle(${article.id})" class="text-xs font-mono text-dim hover:text-red-400 flex items-center transition-colors">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+
+                    card.onclick = () => app.openReader(article.id);
+                    els.articleList.appendChild(card);
+                });
+            },
+
+            openReader: async (id) => {
+                try {
+                    const response = await fetch(`${API_BASE}/articles/${id}`);
+                    const article = await response.json();
+
+                    state.currentArticleId = id;
+
+                    // Populate UI
+                    els.rTitle.textContent = article.title;
+                    els.rSource.textContent = article.source_domain || 'UNKNOWN';
+                    els.rAuthor.textContent = article.author || 'UNKNOWN';
+                    els.rDate.textContent = utils.formatDate(article.captured_at);
+                    els.rTime.textContent = (article.readTime || '5m') + ' READ';
+                    els.rContent.innerHTML = article.content || "<p>Content loading error.</p>";
+
+                    // Switch Views
+                    els.libraryView.classList.add('hidden');
+                    els.readerView.classList.remove('hidden');
+                    window.scrollTo(0, 0);
+                } catch (error) {
+                    console.error("Error loading article:", error);
+                    alert("Failed to load article");
+                }
+            },
+
+            goHome: () => {
+                els.readerView.classList.add('hidden');
+                els.libraryView.classList.remove('hidden');
+                state.currentArticleId = null;
+                els.progressBar.style.width = '0%';
+            },
+
+            deleteArticle: async (id) => {
+                if (!confirm("CONFIRM DELETION: This action is permanent.")) return;
+                try {
+                    await fetch(`${API_BASE}/articles/${id}`, {method: 'DELETE'});
+                    app.loadArticles();
+                } catch (error) {
+                    console.error("Delete failed", error);
+                }
+            },
+
+            deleteCurrent: async () => {
+                if(state.currentArticleId) {
+                    await app.deleteArticle(state.currentArticleId);
+                    app.goHome();
+                }
+            },
+
+            openBookmarkletModal: () => els.bookmarkletModal.classList.remove('hidden'),
+            closeBookmarkletModal: () => els.bookmarkletModal.classList.add('hidden')
+        };
+
+        // Initialize on page load
+        app.init();
+    </script>
+</body>
+</html>
