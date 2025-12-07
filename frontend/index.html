@@ -84,7 +84,10 @@
         </div>
 
         <div class="flex items-center space-x-6">
-            <div id="status-indicator" class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_10px_#22c55e]" title="Connected"></div>
+            <div class="flex items-center space-x-2">
+                <div id="status-indicator" class="w-2 h-2 rounded-full" title="Checking..."></div>
+                <span id="status-text" class="font-mono text-xs text-dim hidden sm:inline"></span>
+            </div>
             <button onclick="app.openBookmarkletModal()" class="flex items-center space-x-2 border border-border px-4 py-1.5 rounded hover:border-cyan hover:text-cyan transition-colors text-sm font-mono group">
                 <i class="fa-solid fa-bookmark text-xs"></i>
                 <span>BOOKMARKLET</span>
@@ -206,6 +209,9 @@
         </div>
     </div>
 
+    <!-- IndexedDB Wrapper -->
+    <script src="/db.js"></script>
+
     <!-- JAVASCRIPT LOGIC -->
     <script>
         // Configuration - will be replaced when deployed to Helios
@@ -214,7 +220,8 @@
         // State & DOM Elements
         const state = {
             articles: [],
-            currentArticleId: null
+            currentArticleId: null,
+            isOffline: false
         };
 
         const els = {
@@ -258,21 +265,44 @@
         // App Logic
         window.app = {
             init: async () => {
-                // Check server health
-                try {
-                    const response = await fetch(`${API_BASE}/health`);
-                    const data = await response.json();
-                    els.statusIndicator.classList.add('bg-green-500', 'shadow-[0_0_10px_#22c55e]');
-                    els.statusIndicator.classList.remove('bg-red-500');
-                    els.statusIndicator.title = "Connected: " + data.articles_count + " articles";
-                } catch (e) {
-                    els.statusIndicator.classList.add('bg-red-500');
-                    els.statusIndicator.classList.remove('bg-green-500', 'shadow-[0_0_10px_#22c55e]');
-                    els.statusIndicator.title = "Disconnected";
+                // Initialize IndexedDB
+                await db.init();
+
+                // Check connectivity
+                const isOnline = await app.checkConnection();
+
+                if (isOnline) {
+                    // Online: fetch fresh data, update cache
+                    await app.loadArticles();
+                    await db.setMetadata('last_sync', Date.now());
+                } else {
+                    // Offline: load from IndexedDB
+                    await app.loadArticlesFromCache();
                 }
 
-                // Load articles
-                app.loadArticles();
+                // Register service worker
+                if ('serviceWorker' in navigator) {
+                    try {
+                        const reg = await navigator.serviceWorker.register('/sw.js');
+                        console.log('[App] Service worker registered:', reg.scope);
+                    } catch (err) {
+                        console.error('[App] Service worker registration failed:', err);
+                    }
+                }
+
+                // Listen for connectivity changes
+                window.addEventListener('online', () => {
+                    console.log('[App] Connection restored');
+                    state.isOffline = false;
+                    app.updateConnectionStatus(true);
+                    app.loadArticles();
+                });
+
+                window.addEventListener('offline', () => {
+                    console.log('[App] Connection lost');
+                    state.isOffline = true;
+                    app.updateConnectionStatus(false);
+                });
 
                 // Scroll listener for reader
                 window.addEventListener('scroll', () => {
@@ -285,6 +315,53 @@
 
                 // Generate bookmarklet
                 app.generateBookmarklet();
+            },
+
+            checkConnection: async () => {
+                try {
+                    const response = await fetch(`${API_BASE}/health`, {
+                        signal: AbortSignal.timeout(3000)
+                    });
+                    return response.ok;
+                } catch {
+                    return false;
+                }
+            },
+
+            updateConnectionStatus: (isOnline) => {
+                if (isOnline) {
+                    els.statusIndicator.className = 'w-2 h-2 rounded-full bg-green-500 shadow-[0_0_10px_#22c55e]';
+                    els.statusIndicator.title = "Online";
+                    document.getElementById('status-text').textContent = "ONLINE";
+                } else {
+                    els.statusIndicator.className = 'w-2 h-2 rounded-full bg-yellow-500 shadow-[0_0_10px_#fbbf24]';
+                    els.statusIndicator.title = "Offline";
+                    document.getElementById('status-text').textContent = "OFFLINE";
+                }
+            },
+
+            loadArticlesFromCache: async () => {
+                const articles = await db.getAllArticles();
+                state.articles = articles;
+                app.renderLibrary();
+
+                if (articles.length === 0) {
+                    els.articleList.innerHTML = '<div class="text-yellow-500 font-mono text-center col-span-full py-12">OFFLINE MODE - NO CACHED ARTICLES</div>';
+                }
+            },
+
+            displayArticle: (article) => {
+                state.currentArticleId = article.id;
+                els.rTitle.textContent = article.title;
+                els.rSource.textContent = article.source_domain || 'UNKNOWN';
+                els.rAuthor.textContent = article.author || 'UNKNOWN';
+                els.rDate.textContent = utils.formatDate(article.captured_at);
+                els.rTime.textContent = (article.readTime || '5m') + ' READ';
+                els.rContent.innerHTML = article.content || "<p>Content loading error.</p>";
+
+                els.libraryView.classList.add('hidden');
+                els.readerView.classList.remove('hidden');
+                window.scrollTo(0, 0);
             },
 
             generateBookmarklet: () => {
@@ -364,14 +441,23 @@
 
             loadArticles: async () => {
                 try {
-                    const response = await fetch(`${API_BASE}/articles`);
+                    const response = await fetch(`${API_BASE}/articles`, {
+                        signal: AbortSignal.timeout(5000)
+                    });
                     const articles = await response.json();
 
+                    // Update IndexedDB cache
+                    await db.saveArticles(articles);
+
                     state.articles = articles;
+                    state.isOffline = false;
+                    app.updateConnectionStatus(true);
                     app.renderLibrary();
                 } catch (error) {
-                    console.error("Error loading articles:", error);
-                    els.articleList.innerHTML = `<div class="text-red-500 font-mono text-center col-span-full">ERROR LOADING DATA</div>`;
+                    console.warn("Network failed, loading from cache:", error);
+                    state.isOffline = true;
+                    app.updateConnectionStatus(false);
+                    await app.loadArticlesFromCache();
                 }
             },
 
@@ -439,26 +525,26 @@
 
             openReader: async (id) => {
                 try {
-                    const response = await fetch(`${API_BASE}/articles/${id}`);
+                    // Try network first
+                    const response = await fetch(`${API_BASE}/articles/${id}`, {
+                        signal: AbortSignal.timeout(5000)
+                    });
                     const article = await response.json();
 
-                    state.currentArticleId = id;
+                    // Cache full article content
+                    await db.saveArticle(article);
 
-                    // Populate UI
-                    els.rTitle.textContent = article.title;
-                    els.rSource.textContent = article.source_domain || 'UNKNOWN';
-                    els.rAuthor.textContent = article.author || 'UNKNOWN';
-                    els.rDate.textContent = utils.formatDate(article.captured_at);
-                    els.rTime.textContent = (article.readTime || '5m') + ' READ';
-                    els.rContent.innerHTML = article.content || "<p>Content loading error.</p>";
-
-                    // Switch Views
-                    els.libraryView.classList.add('hidden');
-                    els.readerView.classList.remove('hidden');
-                    window.scrollTo(0, 0);
+                    app.displayArticle(article);
                 } catch (error) {
-                    console.error("Error loading article:", error);
-                    alert("Failed to load article");
+                    console.warn("Network failed, trying cache:", error);
+
+                    // Try IndexedDB cache
+                    const article = await db.getArticle(id);
+                    if (article) {
+                        app.displayArticle(article);
+                    } else {
+                        alert("Article not available offline");
+                    }
                 }
             },
 
@@ -470,9 +556,17 @@
             },
 
             deleteArticle: async (id) => {
+                if (state.isOffline) {
+                    alert("Cannot delete while offline");
+                    return;
+                }
+
                 if (!confirm("CONFIRM DELETION: This action is permanent.")) return;
+
                 try {
                     await fetch(`${API_BASE}/articles/${id}`, {method: 'DELETE'});
+                    // Also remove from cache
+                    await db.deleteArticle(id);
                     app.loadArticles();
                 } catch (error) {
                     console.error("Delete failed", error);

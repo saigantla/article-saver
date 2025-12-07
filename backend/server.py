@@ -99,6 +99,21 @@ def index():
     """Serve frontend"""
     return send_from_directory(FRONTEND_DIR, 'index.html')
 
+@app.route('/sw.js')
+def service_worker():
+    """Serve service worker with proper MIME type"""
+    response = send_from_directory(FRONTEND_DIR, 'sw.js')
+    response.headers['Content-Type'] = 'application/javascript'
+    response.headers['Service-Worker-Allowed'] = '/'
+    return response
+
+@app.route('/db.js')
+def database_helper():
+    """Serve IndexedDB helper with proper MIME type"""
+    response = send_from_directory(FRONTEND_DIR, 'db.js')
+    response.headers['Content-Type'] = 'application/javascript'
+    return response
+
 @app.route('/save', methods=['POST'])
 def save_article():
     """
