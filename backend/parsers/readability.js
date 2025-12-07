@@ -30,6 +30,7 @@ process.stdin.on('end', () => {
             // Output extracted content as JSON
             const result = {
                 success: true,
+                parser: 'readability',
                 title: article.title,
                 byline: article.byline,
                 excerpt: article.excerpt,
@@ -43,12 +44,14 @@ process.stdin.on('end', () => {
         } else {
             console.log(JSON.stringify({
                 success: false,
+                parser: 'readability',
                 error: "Readability could not extract article"
             }));
         }
     } catch (error) {
         console.log(JSON.stringify({
             success: false,
+            parser: 'readability',
             error: error.message
         }));
     }

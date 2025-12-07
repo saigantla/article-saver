@@ -12,6 +12,8 @@
   "type": "commonjs",
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
+    "@postlight/parser": "^2.2.3",
+    "defuddle": "^0.6.6",
     "jsdom": "^27.2.0"
   }
 }

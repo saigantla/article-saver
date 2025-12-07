@@ -140,8 +140,15 @@
                     <h1 id="reader-title" class="text-3xl md:text-5xl font-bold text-white leading-tight mb-6 font-sans">
                         Article Title
                     </h1>
-                    <div class="flex items-center space-x-2 font-mono text-xs text-dim">
+                    <div class="flex items-center space-x-4 font-mono text-xs text-dim">
                         <span class="bg-cardbg px-2 py-1 rounded border border-border" id="reader-time">5m READ</span>
+                        <select id="parser-selector" class="bg-dark border border-dim text-cyan text-xs font-mono px-2 py-1 rounded hover:border-cyan transition-colors cursor-pointer">
+                            <option value="readability">Mozilla Readability</option>
+                            <option value="defuddle">Defuddle</option>
+                            <option value="postlight">Postlight Parser</option>
+                            <option value="original">Original HTML</option>
+                            <option value="llm">AI-Enhanced (Experimental)</option>
+                        </select>
                     </div>
                 </header>
 
@@ -214,7 +221,8 @@
         // State & DOM Elements
         const state = {
             articles: [],
-            currentArticleId: null
+            currentArticleId: null,
+            parserResults: {}
         };
 
         const els = {
@@ -443,14 +451,68 @@
                     const article = await response.json();
 
                     state.currentArticleId = id;
+                    state.parserResults = article.parser_results || {};
 
-                    // Populate UI
+                    // Populate UI with default parser
                     els.rTitle.textContent = article.title;
                     els.rSource.textContent = article.source_domain || 'UNKNOWN';
                     els.rAuthor.textContent = article.author || 'UNKNOWN';
                     els.rDate.textContent = utils.formatDate(article.captured_at);
                     els.rTime.textContent = (article.readTime || '5m') + ' READ';
                     els.rContent.innerHTML = article.content || "<p>Content loading error.</p>";
+
+                    // Add parser selector listener
+                    const parserSelector = document.getElementById('parser-selector');
+                    parserSelector.onchange = async (e) => {
+                        const selectedParser = e.target.value;
+
+                        // Handle "original" HTML option
+                        if (selectedParser === 'original') {
+                            try {
+                                const response = await fetch(`${API_BASE}/articles/${id}/html`);
+                                const htmlText = await response.text();
+
+                                // Create iframe to display original HTML safely
+                                els.rContent.innerHTML = `<iframe srcdoc="${htmlText.replace(/"/g, '&quot;')}" style="width:100%; min-height:800px; border:none; background:white;" sandbox="allow-same-origin"></iframe>`;
+                                els.rTitle.textContent = article.title;
+                                els.rAuthor.textContent = article.author || 'UNKNOWN';
+                            } catch (error) {
+                                els.rContent.innerHTML = "<p class='text-red-400'>Failed to load original HTML.</p>";
+                            }
+                            return;
+                        }
+
+                        // Handle "llm" AI-Enhanced option
+                        if (selectedParser === 'llm') {
+                            try {
+                                els.rContent.innerHTML = "<p class='text-cyan'>Processing with Gemini AI... This may take a few seconds.</p>";
+                                const response = await fetch(`${API_BASE}/articles/${id}/llm-parse`);
+                                const result = await response.json();
+
+                                if (result.success) {
+                                    els.rContent.innerHTML = result.htmlContent || "<p>No content.</p>";
+                                    els.rTitle.textContent = result.title || article.title;
+                                    els.rAuthor.textContent = article.author || 'UNKNOWN';
+                                } else {
+                                    els.rContent.innerHTML = `<p class='text-red-400'>AI parsing failed: ${result.error}</p>`;
+                                }
+                            } catch (error) {
+                                els.rContent.innerHTML = `<p class='text-red-400'>Failed to process with AI: ${error.message}</p>`;
+                            }
+                            return;
+                        }
+
+                        // Handle parsed results
+                        const parserResult = state.parserResults[selectedParser];
+                        if (parserResult && parserResult.success) {
+                            els.rContent.innerHTML = parserResult.htmlContent || "<p>No content.</p>";
+                            els.rTitle.textContent = parserResult.title || article.title;
+                            els.rAuthor.textContent = parserResult.byline || article.author || 'UNKNOWN';
+                        } else {
+                            // Fallback if parser failed or no results
+                            els.rContent.innerHTML = "<p class='text-red-400'>Parser failed or no results available.</p>";
+                        }
+                    };
 
                     // Switch Views
                     els.libraryView.classList.add('hidden');
