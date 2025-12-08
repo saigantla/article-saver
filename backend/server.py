@@ -185,13 +185,13 @@ def process_article_parsers(article_id, html, html_file):
     try:
         print(f"🔄 Starting parser processing for article {article_id}...")
 
-        # Run all parsers via parser-manager
+        # Run all parsers via parser-manager (10 minute timeout since this is async)
         result = subprocess.run(
             ['node', str(BACKEND_DIR / 'parser-manager.js')],
             input=html,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=600,
             cwd=str(BASE_DIR)
         )
 

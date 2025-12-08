@@ -624,9 +624,38 @@
                             els.rContent.innerHTML = parserResult.htmlContent || "<p>No content.</p>";
                             els.rTitle.textContent = parserResult.title || article.title;
                             els.rAuthor.textContent = parserResult.byline || article.author || 'UNKNOWN';
+                        } else if (!state.parserResults || Object.keys(state.parserResults).length === 0) {
+                            // Parsers are still processing
+                            els.rContent.innerHTML = `<div class="text-cyan text-center py-12">
+                                <p class="font-mono">Parsing in progress...</p>
+                                <p class="text-xs text-dim mt-2">Article content is being extracted</p>
+                            </div>`;
+                            // Poll for updates
+                            setTimeout(() => location.reload(), 3000);
+                        } else if (!parserResult) {
+                            // This specific parser hasn't completed yet, but others might have
+                            // Try to find and switch to a completed parser
+                            const completedParser = Object.keys(state.parserResults).find(
+                                key => state.parserResults[key] && state.parserResults[key].success
+                            );
+                            if (completedParser) {
+                                // Switch to a working parser
+                                els.parserSelector.value = completedParser;
+                                const result = state.parserResults[completedParser];
+                                els.rContent.innerHTML = result.htmlContent || "<p>No content.</p>";
+                                els.rTitle.textContent = result.title || article.title;
+                                els.rAuthor.textContent = result.byline || article.author || 'UNKNOWN';
+                            } else {
+                                // No parsers have succeeded yet
+                                els.rContent.innerHTML = `<div class="text-cyan text-center py-12">
+                                    <p class="font-mono">Parsing in progress...</p>
+                                    <p class="text-xs text-dim mt-2">Trying different parsers...</p>
+                                </div>`;
+                                setTimeout(() => location.reload(), 3000);
+                            }
                         } else {
-                            // Fallback if parser failed or no results
-                            els.rContent.innerHTML = "<p class='text-red-400'>Parser failed or no results available.</p>";
+                            // Parser failed
+                            els.rContent.innerHTML = `<p class='text-red-400'>Parser failed: ${parserResult.error || 'Unknown error'}</p>`;
                         }
                     };
 
