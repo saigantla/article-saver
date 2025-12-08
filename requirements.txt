@@ -1,0 +1,11 @@
+# Web Framework
+Flask==3.0.0
+
+# HTML Parsing
+beautifulsoup4==4.12.2
+
+# HTTP Requests
+requests==2.31.0
+
+# Production WSGI Server (optional, for deployment)
+gunicorn==21.2.0
