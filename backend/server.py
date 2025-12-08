@@ -180,10 +180,72 @@ def database_helper():
     response.headers['Content-Type'] = 'application/javascript'
     return response
 
+def process_article_parsers(article_id, html, html_file):
+    """Background task: Run all parsers and update database"""
+    try:
+        print(f"🔄 Starting parser processing for article {article_id}...")
+
+        # Run all parsers via parser-manager
+        result = subprocess.run(
+            ['node', str(BACKEND_DIR / 'parser-manager.js')],
+            input=html,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(BASE_DIR)
+        )
+
+        if result.returncode != 0:
+            error_msg = result.stderr or "Extraction failed"
+            print(f"❌ Parser manager failed for article {article_id}: {error_msg}")
+            return
+
+        all_results = json.loads(result.stdout)
+        extracted = all_results['results'].get(all_results['default'], {})
+        parser_results = all_results['results']
+
+        if not extracted.get('success'):
+            print(f"❌ Parser extraction failed for article {article_id}")
+            return
+
+        # Extract parsed data
+        title = extracted.get('title', 'Untitled')
+        author = extracted.get('byline', None)
+        text_content = extracted.get('textContent', '')
+        html_content = extracted.get('htmlContent', '')
+        text_length = extracted.get('fullTextLength', 0)
+        read_time = calculate_read_time(text_length)
+        snippet = generate_snippet(text_content)
+
+        # Update database with parsed results
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('''
+            UPDATE articles
+            SET title = ?, author = ?, text_content = ?, html_content = ?,
+                snippet = ?, text_length = ?, read_time = ?, parser_results = ?
+            WHERE id = ?
+        ''', (title, author, text_content, html_content, snippet,
+              text_length, read_time, json.dumps(parser_results), article_id))
+        conn.commit()
+        conn.close()
+
+        print(f"✅ Parser processing complete for article {article_id}")
+        print(f"   Title: {title}")
+        print(f"   Author: {author or 'N/A'}")
+        print(f"   Text length: {text_length:,} characters")
+        print(f"   Read time: {read_time}")
+
+    except Exception as e:
+        print(f"❌ Exception in parser processor for article {article_id}: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 @app.route('/save', methods=['POST'])
 def save_article():
     """
-    Main endpoint: receives HTML, extracts content, saves everything
+    Main endpoint: receives HTML, saves immediately, processes parsers async
     """
     data = request.json
     html = data.get('html', '')
@@ -215,61 +277,26 @@ def save_article():
         }), 409
 
     try:
-        # 1. Extract content with all parsers via parser-manager
-        result = subprocess.run(
-            ['node', str(BACKEND_DIR / 'parser-manager.js')],
-            input=html,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=str(BASE_DIR)
-        )
+        # Quick extraction of title from HTML for immediate response
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, 'html.parser')
+        title_tag = soup.find('title')
+        title = title_tag.get_text().strip() if title_tag else 'Untitled'
 
-        if result.returncode != 0:
-            error_msg = result.stderr or "Extraction failed"
-            print(f"❌ Parser manager failed: {error_msg}")
-            return jsonify({
-                "success": False,
-                "error": error_msg
-            }), 500
-
-        all_results = json.loads(result.stdout)
-
-        # Use default parser (readability) for backward compatibility
-        # Store all parser results for comparison
-        extracted = all_results['results'].get(all_results['default'], {})
-        parser_results = all_results['results']  # Store all for comparison
-
-        if not extracted.get('success'):
-            print(f"❌ Readability could not parse article")
-            return jsonify({
-                "success": False,
-                "error": "Could not extract article content"
-            }), 400
-
-        # Extract metadata
-        title = extracted.get('title', 'Untitled')
-        author = extracted.get('byline', None)
-        text_content = extracted.get('textContent', '')
-        html_content = extracted.get('htmlContent', '')
-        text_length = extracted.get('fullTextLength', 0)
-
-        # Calculate derived fields
+        # Calculate basic fields
         source_domain = extract_domain(original_url or archive_url)
-        read_time = calculate_read_time(text_length)
-        snippet = generate_snippet(text_content)
 
-        # 2. Generate filename
+        # Generate filename
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         slug = slugify(title)
         filename = f"{timestamp}_{slug}.html"
         filepath = HTML_DIR / filename
 
-        # 3. Save HTML file
+        # Save HTML file
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(html)
 
-        # 4. Save to database (INSERT or UPDATE)
+        # Save to database with minimal data (parsers will update later)
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
@@ -287,24 +314,17 @@ def save_article():
 
             c.execute('''
                 UPDATE articles
-                SET title = ?, author = ?, source_domain = ?, original_url = ?,
-                    text_content = ?, html_content = ?, snippet = ?,
-                    text_length = ?, read_time = ?, html_file = ?, parser_results = ?,
+                SET title = ?, source_domain = ?, original_url = ?, html_file = ?,
                     captured_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            ''', (title, author, source_domain, original_url,
-                  text_content, html_content, snippet, text_length, read_time, filename,
-                  json.dumps(parser_results), article_id))
+            ''', (title, source_domain, original_url, filename, article_id))
         else:
-            # Insert new article
+            # Insert new article with minimal data
             c.execute('''
                 INSERT INTO articles
-                (title, author, source_domain, archive_url, original_url,
-                 text_content, html_content, snippet, text_length, read_time, html_file, parser_results)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (title, author, source_domain, archive_url, original_url,
-                  text_content, html_content, snippet, text_length, read_time, filename,
-                  json.dumps(parser_results)))
+                (title, source_domain, archive_url, original_url, html_file)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (title, source_domain, archive_url, original_url, filename))
             article_id = c.lastrowid
 
         conn.commit()
@@ -313,12 +333,18 @@ def save_article():
         print(f"✅ Article saved!")
         print(f"   ID: {article_id}")
         print(f"   Title: {title}")
-        print(f"   Author: {author or 'N/A'}")
         print(f"   Domain: {source_domain}")
-        print(f"   Text length: {text_length:,} characters")
-        print(f"   Read time: {read_time}")
         print(f"   File: {filename}")
         print(f"{'='*80}\n")
+
+        # Queue async parser processing in background
+        threading.Thread(
+            target=process_article_parsers,
+            args=(article_id, html, filename),
+            daemon=True,
+            name=f"Parser-{article_id}"
+        ).start()
+        print(f"🚀 Queued parser processing for article {article_id}")
 
         # Queue async LLM processing in background
         threading.Thread(
@@ -333,15 +359,8 @@ def save_article():
             "success": True,
             "id": article_id,
             "title": title,
-            "author": author,
-            "read_time": read_time,
-            "text_length": text_length,
-            "message": "Article saved successfully!"
+            "message": "Article saved! Processing in background..."
         })
-
-    except subprocess.TimeoutExpired:
-        print(f"❌ Timeout processing HTML")
-        return jsonify({"success": False, "error": "Processing timeout"}), 500
     except Exception as e:
         print(f"❌ Error: {str(e)}")
         import traceback
