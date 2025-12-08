@@ -13,10 +13,12 @@ import subprocess
 import json
 import sqlite3
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 import re
 from urllib.parse import urlparse
+import llm_parser
 
 app = Flask(__name__)
 CORS(app)
@@ -53,9 +55,21 @@ def init_db():
             html_file TEXT,
             captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             processed BOOLEAN DEFAULT TRUE,
-            parser_results TEXT
+            parser_results TEXT,
+            llm_content TEXT,
+            llm_status TEXT DEFAULT 'pending'
         )
     ''')
+
+    # Migration: Add llm columns if they don't exist
+    try:
+        c.execute("SELECT llm_content FROM articles LIMIT 1")
+    except sqlite3.OperationalError:
+        print("Migrating database: Adding llm_content and llm_status columns...")
+        c.execute("ALTER TABLE articles ADD COLUMN llm_content TEXT")
+        c.execute("ALTER TABLE articles ADD COLUMN llm_status TEXT DEFAULT 'pending'")
+        print("Migration complete!")
+
     conn.commit()
     conn.close()
 
@@ -94,6 +108,57 @@ def generate_snippet(text, max_length=300):
     if last_period > max_length * 0.7:  # If period is not too early
         return snippet[:last_period + 1]
     return snippet + "..."
+
+# LLM Processing helpers
+def update_llm_status(article_id, status, error=None):
+    """Update LLM processing status in database"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    if error:
+        c.execute('UPDATE articles SET llm_status = ?, llm_content = ? WHERE id = ?',
+                  (status, f"Error: {error}", article_id))
+    else:
+        c.execute('UPDATE articles SET llm_status = ? WHERE id = ?', (status, article_id))
+    conn.commit()
+    conn.close()
+
+def store_llm_content(article_id, content):
+    """Store LLM-processed content in database"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('UPDATE articles SET llm_content = ?, llm_status = ? WHERE id = ?',
+              (content, 'completed', article_id))
+    conn.commit()
+    conn.close()
+
+def process_article_llm(article_id, html):
+    """Background task: Process article with LLM"""
+    try:
+        print(f"\n🤖 Starting LLM processing for article {article_id}...")
+        update_llm_status(article_id, 'processing')
+
+        # Process with LLM
+        result = llm_parser.process_article(html)
+
+        if result['success']:
+            print(f"✅ LLM processing complete for article {article_id}")
+            print(f"   Method: {result['method']}")
+            print(f"   Input size: {result.get('input_size', 'N/A'):,} chars")
+            print(f"   Output size: {result.get('output_size', 'N/A'):,} chars")
+            store_llm_content(article_id, result['content'])
+        elif result.get('rate_limited'):
+            print(f"⏸️  Rate limited, article {article_id} will retry later")
+            update_llm_status(article_id, 'pending')
+        else:
+            error = result.get('error', 'Unknown error')
+            print(f"❌ LLM processing failed for article {article_id}: {error}")
+            update_llm_status(article_id, 'failed', error)
+
+    except Exception as e:
+        print(f"❌ Exception in LLM processor for article {article_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        update_llm_status(article_id, 'failed', str(e))
 
 @app.route('/')
 def index():
@@ -255,6 +320,15 @@ def save_article():
         print(f"   File: {filename}")
         print(f"{'='*80}\n")
 
+        # Queue async LLM processing in background
+        threading.Thread(
+            target=process_article_llm,
+            args=(article_id, html),
+            daemon=True,
+            name=f"LLM-{article_id}"
+        ).start()
+        print(f"🚀 Queued LLM processing for article {article_id}")
+
         return jsonify({
             "success": True,
             "id": article_id,
@@ -338,7 +412,9 @@ def get_article(article_id):
         'text_length': row['text_length'],
         'readTime': row['read_time'],
         'captured_at': row['captured_at'],
-        'parser_results': parser_results
+        'parser_results': parser_results,
+        'llm_content': row['llm_content'],
+        'llm_status': row['llm_status']
     })
 
 @app.route('/articles/<int:article_id>/html', methods=['GET'])
@@ -520,6 +596,38 @@ def health():
         "message": "Article Saver running",
         "articles_count": count
     })
+
+@app.route('/articles/<int:article_id>/reprocess-llm', methods=['POST'])
+def reprocess_llm(article_id):
+    """Manually trigger LLM processing for an article (useful for failed/pending articles)"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Get article HTML file
+    c.execute('SELECT html_file FROM articles WHERE id = ?', (article_id,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({"success": False, "error": "Article not found"}), 404
+
+    # Read HTML file
+    filepath = HTML_DIR / row[0]
+    if not filepath.exists():
+        return jsonify({"success": False, "error": "HTML file not found"}), 404
+
+    with open(filepath, 'r', encoding='utf-8') as f:
+        html = f.read()
+
+    # Queue LLM processing
+    threading.Thread(
+        target=process_article_llm,
+        args=(article_id, html),
+        daemon=True,
+        name=f"LLM-Reprocess-{article_id}"
+    ).start()
+
+    return jsonify({"success": True, "message": f"LLM processing queued for article {article_id}"})
 
 if __name__ == '__main__':
     print("\n" + "="*80)

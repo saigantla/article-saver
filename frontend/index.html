@@ -579,20 +579,41 @@
 
                         // Handle "llm" AI-Enhanced option
                         if (selectedParser === 'llm') {
-                            try {
-                                els.rContent.innerHTML = "<p class='text-cyan'>Processing with Gemini AI... This may take a few seconds.</p>";
-                                const response = await fetch(`${API_BASE}/articles/${id}/llm-parse`);
-                                const result = await response.json();
+                            const llmStatus = article.llm_status || 'pending';
+                            const llmContent = article.llm_content;
 
-                                if (result.success) {
-                                    els.rContent.innerHTML = result.htmlContent || "<p>No content.</p>";
-                                    els.rTitle.textContent = result.title || article.title;
-                                    els.rAuthor.textContent = article.author || 'UNKNOWN';
-                                } else {
-                                    els.rContent.innerHTML = `<p class='text-red-400'>AI parsing failed: ${result.error}</p>`;
-                                }
-                            } catch (error) {
-                                els.rContent.innerHTML = `<p class='text-red-400'>Failed to process with AI: ${error.message}</p>`;
+                            if (llmStatus === 'completed' && llmContent) {
+                                // Display stored LLM content
+                                els.rContent.innerHTML = llmContent;
+                            } else if (llmStatus === 'processing') {
+                                // Currently processing
+                                els.rContent.innerHTML = `<div class="text-cyan text-center py-12">
+                                    <div class="loader mx-auto mb-4"></div>
+                                    <p class="font-mono text-sm">AI parsing in progress...</p>
+                                    <p class="text-xs text-dim mt-2">This page will auto-refresh when complete</p>
+                                </div>`;
+                                // Poll for completion every 5 seconds
+                                setTimeout(() => location.reload(), 5000);
+                            } else if (llmStatus === 'failed') {
+                                // Processing failed
+                                els.rContent.innerHTML = `<div class="text-red-400 text-center py-12">
+                                    <p class="font-mono">AI parsing failed</p>
+                                    <p class="text-sm text-dim mt-2">${llmContent || 'Unknown error'}</p>
+                                    <button onclick="app.retryLlm(${id})" class="mt-4 px-4 py-2 bg-cyan/10 border border-cyan text-cyan rounded hover:bg-cyan hover:text-black transition-colors font-mono text-sm">
+                                        Retry Processing
+                                    </button>
+                                </div>`;
+                            } else if (llmStatus === 'skipped') {
+                                // Skipped (content too small)
+                                els.rContent.innerHTML = `<p class="text-yellow-500 text-center py-12">AI parsing was skipped (content too small or not an article)</p>`;
+                            } else {
+                                // Pending/queued
+                                els.rContent.innerHTML = `<div class="text-cyan text-center py-12">
+                                    <p class="font-mono">AI parsing queued...</p>
+                                    <p class="text-xs text-dim mt-2">Processing will begin shortly</p>
+                                </div>`;
+                                // Poll for updates
+                                setTimeout(() => location.reload(), 3000);
                             }
                             return;
                         }
@@ -663,6 +684,26 @@
                     console.error("Download failed:", error);
                     button.innerHTML = '<i class="fa-solid fa-download"></i>';
                     alert("Failed to download article for offline use");
+                }
+            },
+
+            retryLlm: async (id) => {
+                try {
+                    const response = await fetch(`${API_BASE}/articles/${id}/reprocess-llm`, {
+                        method: 'POST'
+                    });
+                    const result = await response.json();
+
+                    if (result.success) {
+                        alert("LLM processing queued! This page will reload when complete.");
+                        // Reload to show processing status
+                        location.reload();
+                    } else {
+                        alert("Failed to queue LLM processing: " + result.error);
+                    }
+                } catch (error) {
+                    console.error("Retry failed:", error);
+                    alert("Failed to queue LLM processing");
                 }
             },
 
