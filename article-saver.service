@@ -7,6 +7,7 @@ Type=simple
 User=gantl
 WorkingDirectory=/home/gantl/article-saver
 Environment="PATH=/home/gantl/article-saver/venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/home/gantl/article-saver/.env
 ExecStart=/home/gantl/article-saver/venv/bin/python3 backend/server.py
 Restart=always
 RestartSec=10

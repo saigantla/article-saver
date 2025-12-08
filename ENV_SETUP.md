@@ -40,11 +40,41 @@ export $(cat .env | xargs)
 python3 backend/server.py
 ```
 
-### For Remote Server Deployment
+### For Remote Server Deployment (systemd)
 
-1. SSH into your server
-2. Navigate to the project directory
-3. Create `.env` file with your API key
-4. Run using one of the methods above
+If you're using systemd to manage the service:
 
-**IMPORTANT:** Never commit the `.env` file to git. It's already in `.gitignore`.
+1. **SSH into your server and navigate to the project directory:**
+   ```bash
+   cd /home/gantl/article-saver
+   ```
+
+2. **Create `.env` file with your API key:**
+   ```bash
+   nano .env
+   ```
+   Add this line:
+   ```
+   CHUTES_API_KEY=your_actual_api_key_here
+   ```
+
+3. **The systemd service file is already configured** to load `.env`:
+   ```ini
+   EnvironmentFile=/home/gantl/article-saver/.env
+   ```
+
+4. **Copy the updated service file and reload systemd:**
+   ```bash
+   sudo cp article-saver.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl restart article-saver
+   ```
+
+5. **Verify it's working:**
+   ```bash
+   sudo systemctl status article-saver
+   ```
+
+**IMPORTANT:**
+- Never commit the `.env` file to git. It's already in `.gitignore`.
+- Make sure the `.env` file has proper permissions (readable by the service user).
