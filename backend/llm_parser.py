@@ -8,12 +8,13 @@ import requests
 import re
 import json
 import time
+import os
 from datetime import date
 from bs4 import BeautifulSoup, Comment
 
 # API Configuration
 CHUTES_ENDPOINT = "https://llm.chutes.ai/v1/chat/completions"
-CHUTES_API_KEY = "cpk_557af5e073424e18873db302b324e5e9.814bf52d333f5742aa78f6904ce33ba9.JP9a4vwS7YcsElLgUNef2jGjkgaKPgo7"
+CHUTES_API_KEY = os.getenv("CHUTES_API_KEY", "")
 CHUTES_MODEL = "deepseek-ai/DeepSeek-V3.2"  # Standard model, not Speciale
 MAX_TOKENS_INPUT = 150000  # Token limit (leave room for output)
 MAX_CHARS = 450000  # ~150K tokens at 3 chars/token
@@ -264,6 +265,9 @@ INSTRUCTIONS:
 HTML Fragment:
 {chunk}"""
 
+    if not CHUTES_API_KEY:
+        raise APIError("CHUTES_API_KEY environment variable not set")
+
     payload = {
         "model": CHUTES_MODEL,
         "messages": [{"role": "user", "content": prompt}],
@@ -343,6 +347,9 @@ def call_chutes_api(content: str, retries=3) -> str:
         RateLimitError: Daily limit reached
         APIError: API request failed
     """
+    if not CHUTES_API_KEY:
+        raise APIError("CHUTES_API_KEY environment variable not set")
+
     check_rate_limit()
 
     prompt = f"""Extract and clean the main article content from this HTML.
