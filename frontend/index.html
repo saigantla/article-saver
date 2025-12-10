@@ -84,6 +84,9 @@
         </div>
 
         <div class="flex items-center space-x-6">
+            <button onclick="app.refreshData()" class="text-dim hover:text-cyan transition-colors" title="Refresh Data">
+                <i id="refresh-icon" class="fa-solid fa-arrows-rotate"></i>
+            </button>
             <div class="flex items-center space-x-2">
                 <div id="status-indicator" class="w-2 h-2 rounded-full" title="Checking..."></div>
                 <span id="status-text" class="font-mono text-xs text-dim hidden sm:inline"></span>
@@ -245,7 +248,8 @@
             rAuthor: document.getElementById('reader-author'),
             rDate: document.getElementById('reader-date'),
             rTime: document.getElementById('reader-time'),
-            rContent: document.getElementById('reader-content')
+            rContent: document.getElementById('reader-content'),
+            refreshIcon: document.getElementById('refresh-icon')
         };
 
         // Helper Functions
@@ -346,6 +350,14 @@
                     els.statusIndicator.title = "Offline";
                     document.getElementById('status-text').textContent = "OFFLINE";
                 }
+            },
+
+            refreshData: () => {
+                if(els.refreshIcon) els.refreshIcon.classList.add('fa-spin');
+                app.loadArticles();
+                setTimeout(() => {
+                    if(els.refreshIcon) els.refreshIcon.classList.remove('fa-spin');
+                }, 800);
             },
 
             loadArticlesFromCache: async () => {
