@@ -165,6 +165,10 @@ def index():
     """Serve frontend"""
     return send_from_directory(FRONTEND_DIR, 'index.html')
 
+@app.route('/index.html')
+def index_file():
+    return send_from_directory(FRONTEND_DIR, 'index.html')
+
 @app.route('/sw.js')
 def service_worker():
     """Serve service worker with proper MIME type"""
@@ -238,6 +242,68 @@ def process_article_parsers(article_id, html, html_file):
 
     except Exception as e:
         print(f"❌ Exception in parser processor for article {article_id}: {e}")
+        import traceback
+        traceback.print_exc()
+
+def process_single_parser(article_id, html, parser_name):
+    """Background task: Run a single parser and update specific result in database"""
+    try:
+        print(f"🔄 Re-driving parser '{parser_name}' for article {article_id}...")
+
+        # Run specific parser
+        result = subprocess.run(
+            ['node', str(BACKEND_DIR / 'parser-manager.js'), parser_name],
+            input=html,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=str(BASE_DIR)
+        )
+
+        new_result = None
+
+        if result.returncode != 0:
+            error_msg = result.stderr or "Extraction failed"
+            print(f"❌ Parser '{parser_name}' failed for article {article_id}: {error_msg}")
+            new_result = {"success": False, "error": error_msg}
+        else:
+            try:
+                output = json.loads(result.stdout)
+                new_result = output['results'].get(parser_name)
+            except Exception as e:
+                print(f"❌ Failed to parse JSON output: {e}")
+                new_result = {"success": False, "error": f"JSON parse error: {e}"}
+
+        if not new_result:
+            print(f"❌ No result returned for parser '{parser_name}'")
+            new_result = {"success": False, "error": "No result returned"}
+
+        # Update database
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # Get existing results
+        c.execute('SELECT parser_results FROM articles WHERE id = ?', (article_id,))
+        row = c.fetchone()
+        existing_json = row[0] if row and row[0] else '{}'
+        
+        try:
+            results = json.loads(existing_json)
+        except:
+            results = {}
+            
+        # Update specific parser result
+        results[parser_name] = new_result
+        
+        c.execute('UPDATE articles SET parser_results = ? WHERE id = ?', 
+                  (json.dumps(results), article_id))
+        conn.commit()
+        conn.close()
+
+        print(f"✅ Re-drive of '{parser_name}' complete for article {article_id}")
+
+    except Exception as e:
+        print(f"❌ Exception in single parser processor for article {article_id}: {e}")
         import traceback
         traceback.print_exc()
 
@@ -523,6 +589,50 @@ def reprocess_llm(article_id):
     ).start()
 
     return jsonify({"success": True, "message": f"LLM processing queued for article {article_id}"})
+
+@app.route('/articles/<int:article_id>/reprocess', methods=['POST'])
+def reprocess_article(article_id):
+    """Trigger re-processing for a specific parser"""
+    data = request.json
+    parser = data.get('parser')
+    
+    if not parser:
+        return jsonify({"success": False, "error": "Parser name required"}), 400
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT html_file FROM articles WHERE id = ?', (article_id,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({"success": False, "error": "Article not found"}), 404
+
+    filepath = HTML_DIR / row[0]
+    if not filepath.exists():
+        return jsonify({"success": False, "error": "HTML file not found"}), 404
+
+    with open(filepath, 'r', encoding='utf-8') as f:
+        html = f.read()
+
+    if parser == 'llm':
+        threading.Thread(
+            target=process_article_llm,
+            args=(article_id, html),
+            daemon=True,
+            name=f"LLM-Reprocess-{article_id}"
+        ).start()
+    elif parser in ['readability', 'defuddle', 'postlight']:
+        threading.Thread(
+            target=process_single_parser,
+            args=(article_id, html, parser),
+            daemon=True,
+            name=f"Parser-{parser}-{article_id}"
+        ).start()
+    else:
+        return jsonify({"success": False, "error": "Invalid parser"}), 400
+
+    return jsonify({"success": True, "message": f"Queued re-processing for {parser}"})
 
 if __name__ == '__main__':
     print("\n" + "="*80)

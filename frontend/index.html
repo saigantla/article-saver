@@ -148,13 +148,28 @@
                     </h1>
                     <div class="flex items-center space-x-4 font-mono text-xs text-dim">
                         <span class="bg-cardbg px-2 py-1 rounded border border-border" id="reader-time">5m READ</span>
-                        <select id="parser-selector" class="bg-dark border border-dim text-cyan text-xs font-mono px-2 py-1 rounded hover:border-cyan transition-colors cursor-pointer">
-                            <option value="readability">Mozilla Readability</option>
-                            <option value="defuddle">Defuddle</option>
-                            <option value="postlight">Postlight Parser</option>
-                            <option value="original">Original HTML</option>
-                            <option value="llm">AI-Enhanced (Experimental)</option>
-                        </select>
+                        
+                        <!-- Parser Controls -->
+                        <div class="flex items-center space-x-4">
+                            <button onclick="app.redriveParsing()" title="Redrive Parsing" class="text-dim hover:text-cyan transition-colors">
+                                <i id="redrive-icon" class="fa-solid fa-rotate-right text-xs"></i>
+                            </button>
+                            
+                            <div class="relative group">
+                                <button class="flex items-center space-x-2 font-mono text-xs text-dim hover:text-white border border-border rounded px-3 py-1">
+                                    <span id="current-parser-label">MODE: READABILITY</span>
+                                    <i class="fa-solid fa-chevron-down text-[10px]"></i>
+                                </button>
+                                <!-- Dropdown -->
+                                <div class="absolute right-0 mt-1 w-48 bg-cardbg border border-border rounded shadow-xl hidden group-hover:block z-50">
+                                    <button onclick="app.setParser('readability')" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">READABILITY</button>
+                                    <button onclick="app.setParser('defuddle')" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">DEFUDDLE</button>
+                                    <button onclick="app.setParser('postlight')" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">POSTLIGHT</button>
+                                    <button onclick="app.setParser('llm')" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">LLM</button>
+                                    <button onclick="app.setParser('original')" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">RAW HTML</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </header>
 
@@ -231,8 +246,10 @@
         const state = {
             articles: [],
             currentArticleId: null,
+            currentParserMode: 'readability',
             isOffline: false,
-            parserResults: {}
+            parserResults: {},
+            reprocessTriggered: new Set()
         };
 
         const els = {
@@ -249,7 +266,9 @@
             rDate: document.getElementById('reader-date'),
             rTime: document.getElementById('reader-time'),
             rContent: document.getElementById('reader-content'),
-            refreshIcon: document.getElementById('refresh-icon')
+            refreshIcon: document.getElementById('refresh-icon'),
+            redriveIcon: document.getElementById('redrive-icon'),
+            currentParserLabel: document.getElementById('current-parser-label')
         };
 
         // Helper Functions
@@ -370,7 +389,29 @@
                 }
             },
 
-            displayArticle: (article) => {
+            loadArticles: async () => {
+                try {
+                    const response = await fetch(`${API_BASE}/articles`, {
+                        signal: AbortSignal.timeout(5000)
+                    });
+                    const articles = await response.json();
+
+                    // Update IndexedDB cache
+                    await db.saveArticles(articles);
+
+                    state.articles = articles;
+                    state.isOffline = false;
+                    app.updateConnectionStatus(true);
+                    app.renderLibrary();
+                } catch (error) {
+                    console.warn("Network failed, loading from cache:", error);
+                    state.isOffline = true;
+                    app.updateConnectionStatus(false);
+                    await app.loadArticlesFromCache();
+                }
+            },
+
+            renderLibrary: () => {
                 state.currentArticleId = article.id;
                 els.rTitle.textContent = article.title;
                 els.rSource.textContent = article.source_domain || 'UNKNOWN';
@@ -546,6 +587,8 @@
                 });
             },
 
+
+
             openReader: async (id) => {
                 try {
                     // Try network first
@@ -557,6 +600,7 @@
                     // Cache full article content for offline use
                     await db.saveArticle(article);
 
+                    state.reprocessTriggered.clear();
                     state.currentArticleId = id;
                     state.parserResults = article.parser_results || {};
 
@@ -568,108 +612,8 @@
                     els.rTime.textContent = (article.readTime || '5m') + ' READ';
                     els.rContent.innerHTML = article.content || "<p>Content loading error.</p>";
 
-                    // Add parser selector listener
-                    const parserSelector = document.getElementById('parser-selector');
-                    parserSelector.onchange = async (e) => {
-                        const selectedParser = e.target.value;
-
-                        // Handle "original" HTML option
-                        if (selectedParser === 'original') {
-                            try {
-                                const response = await fetch(`${API_BASE}/articles/${id}/html`);
-                                const htmlText = await response.text();
-
-                                // Create iframe to display original HTML safely
-                                els.rContent.innerHTML = `<iframe srcdoc="${htmlText.replace(/"/g, '&quot;')}" style="width:100%; min-height:800px; border:none; background:white;" sandbox="allow-same-origin"></iframe>`;
-                                els.rTitle.textContent = article.title;
-                                els.rAuthor.textContent = article.author || 'UNKNOWN';
-                            } catch (error) {
-                                els.rContent.innerHTML = "<p class='text-red-400'>Failed to load original HTML.</p>";
-                            }
-                            return;
-                        }
-
-                        // Handle "llm" AI-Enhanced option
-                        if (selectedParser === 'llm') {
-                            const llmStatus = article.llm_status || 'pending';
-                            const llmContent = article.llm_content;
-
-                            if (llmStatus === 'completed' && llmContent) {
-                                // Display stored LLM content
-                                els.rContent.innerHTML = llmContent;
-                            } else if (llmStatus === 'processing') {
-                                // Currently processing
-                                els.rContent.innerHTML = `<div class="text-cyan text-center py-12">
-                                    <div class="loader mx-auto mb-4"></div>
-                                    <p class="font-mono text-sm">AI parsing in progress...</p>
-                                    <p class="text-xs text-dim mt-2">This page will auto-refresh when complete</p>
-                                </div>`;
-                                // Poll for completion every 5 seconds
-                                setTimeout(() => location.reload(), 5000);
-                            } else if (llmStatus === 'failed') {
-                                // Processing failed
-                                els.rContent.innerHTML = `<div class="text-red-400 text-center py-12">
-                                    <p class="font-mono">AI parsing failed</p>
-                                    <p class="text-sm text-dim mt-2">${llmContent || 'Unknown error'}</p>
-                                    <button onclick="app.retryLlm(${id})" class="mt-4 px-4 py-2 bg-cyan/10 border border-cyan text-cyan rounded hover:bg-cyan hover:text-black transition-colors font-mono text-sm">
-                                        Retry Processing
-                                    </button>
-                                </div>`;
-                            } else if (llmStatus === 'skipped') {
-                                // Skipped (content too small)
-                                els.rContent.innerHTML = `<p class="text-yellow-500 text-center py-12">AI parsing was skipped (content too small or not an article)</p>`;
-                            } else {
-                                // Pending/queued
-                                els.rContent.innerHTML = `<div class="text-cyan text-center py-12">
-                                    <p class="font-mono">AI parsing queued...</p>
-                                    <p class="text-xs text-dim mt-2">Processing will begin shortly</p>
-                                </div>`;
-                                // Poll for updates
-                                setTimeout(() => location.reload(), 3000);
-                            }
-                            return;
-                        }
-
-                        // Handle parsed results
-                        const parserResult = state.parserResults[selectedParser];
-                        if (parserResult && parserResult.success) {
-                            els.rContent.innerHTML = parserResult.htmlContent || "<p>No content.</p>";
-                            els.rTitle.textContent = parserResult.title || article.title;
-                            els.rAuthor.textContent = parserResult.byline || article.author || 'UNKNOWN';
-                        } else if (!state.parserResults || Object.keys(state.parserResults).length === 0) {
-                            // Parsers are still processing
-                            els.rContent.innerHTML = `<div class="text-cyan text-center py-12">
-                                <p class="font-mono">Parsing in progress...</p>
-                                <p class="text-xs text-dim mt-2">Article content is being extracted</p>
-                            </div>`;
-                            // Poll for updates
-                            setTimeout(() => location.reload(), 3000);
-                        } else if (!parserResult) {
-                            // This specific parser hasn't completed yet, but others might have
-                            // Try to find and switch to a completed parser
-                            const completedParser = Object.keys(state.parserResults).find(
-                                key => state.parserResults[key] && state.parserResults[key].success
-                            );
-                            if (completedParser) {
-                                // Switch to a working parser
-                                els.parserSelector.value = completedParser;
-                                const result = state.parserResults[completedParser];
-                                els.rContent.innerHTML = result.htmlContent || "<p>No content.</p>";
-                                els.rTitle.textContent = result.title || article.title;
-                                els.rAuthor.textContent = result.byline || article.author || 'UNKNOWN';
-                            } else {
-                                // No parsers have succeeded yet
-                                els.rContent.innerHTML = `<div class="text-cyan text-center py-12">
-                                    <p class="font-mono">Parsing in progress...</p>
-                                    <p class="text-xs text-dim mt-2">Trying different parsers...</p>
-                                </div>`;
-                                setTimeout(() => location.reload(), 3000);
-                            }
-                        } else {
-                            // Parser failed
-                            els.rContent.innerHTML = `<p class='text-red-400'>Parser failed: ${parserResult.error || 'Unknown error'}</p>`;
-                        }
-                    };
+                    // Initialize parser view
+                    app.setParser('readability');
 
                     // Switch Views
                     els.libraryView.classList.add('hidden');
@@ -685,6 +629,155 @@
                     } else {
                         alert("Article not available offline");
                     }
+                }
+            },
+
+            setParser: async (mode) => {
+                state.currentParserMode = mode;
+                if(els.currentParserLabel) {
+                    const labelMap = {
+                        'readability': 'READABILITY',
+                        'defuddle': 'DEFUDDLE',
+                        'postlight': 'POSTLIGHT',
+                        'llm': 'LLM',
+                        'original': 'RAW HTML'
+                    };
+                    els.currentParserLabel.textContent = `MODE: ${labelMap[mode] || mode.toUpperCase()}`;
+                }
+                
+                const id = state.currentArticleId;
+                if(!id) return;
+                
+                // Handle "original" HTML
+                if (mode === 'original') {
+                    try {
+                        const response = await fetch(`${API_BASE}/articles/${id}/html`);
+                        const htmlText = await response.text();
+                        els.rContent.innerHTML = `<iframe srcdoc="${htmlText.replace(/"/g, '&quot;')}" style="width:100%; min-height:800px; border:none; background:white;" sandbox="allow-same-origin"></iframe>`;
+                    } catch (error) {
+                        els.rContent.innerHTML = "<p class='text-red-400'>Failed to load original HTML.</p>";
+                    }
+                    return;
+                }
+
+                // Handle "llm" AI-Enhanced option
+                if (mode === 'llm') {
+                    try {
+                         // Re-fetch to check status
+                         const response = await fetch(`${API_BASE}/articles/${id}`);
+                         const article = await response.json();
+                         state.parserResults = article.parser_results || {}; 
+                         
+                        const llmStatus = article.llm_status || 'pending';
+                        const llmContent = article.llm_content;
+
+                        if (llmStatus === 'completed' && llmContent) {
+                            els.rContent.innerHTML = llmContent;
+                        } else if (llmStatus === 'processing') {
+                            els.rContent.innerHTML = `<div class="text-cyan text-center py-12">
+                                <div class="loader mx-auto mb-4"></div>
+                                <p class="font-mono text-sm">AI parsing in progress...</p>
+                                <p class="text-xs text-dim mt-2">This page will auto-refresh...</p>
+                            </div>`;
+                            setTimeout(() => app.setParser('llm'), 5000); 
+                        } else if (llmStatus === 'failed') {
+                            els.rContent.innerHTML = `<div class="text-red-400 text-center py-12">
+                                <p class="font-mono">AI parsing failed</p>
+                                <p class="text-sm text-dim mt-2">${llmContent || 'Unknown error'}</p>
+                            </div>`;
+                        } else {
+                             els.rContent.innerHTML = `<div class="text-cyan text-center py-12">
+                                <p class="font-mono">AI parsing queued...</p>
+                            </div>`;
+                            setTimeout(() => app.setParser('llm'), 3000);
+                        }
+                    } catch(e) { console.error(e); }
+                    return;
+                }
+
+                // Handle standard parsers
+                
+                // Check if we need to fetch/poll for results
+                let parserResult = state.parserResults ? state.parserResults[mode] : null;
+                
+                if (!parserResult || !state.parserResults || Object.keys(state.parserResults).length === 0) {
+                    try {
+                        // Fetch latest data
+                        const response = await fetch(`${API_BASE}/articles/${id}`);
+                        const article = await response.json();
+                        state.parserResults = article.parser_results || {};
+                        parserResult = state.parserResults[mode];
+                        
+                        // If still missing, keep polling
+                        if (!parserResult) {
+                             els.rContent.innerHTML = `<div class="text-cyan text-center py-12">
+                                <div class="loader mx-auto mb-4"></div>
+                                <p class="font-mono text-sm">Parsing in progress...</p>
+                                <p class="text-xs text-dim mt-2">Waiting for ${mode.toUpperCase()} parser...</p>
+                            </div>`;
+                            
+                            // Auto-redrive if stuck/missing
+                            const triggerKey = `${id}-${mode}`;
+                            if(!state.reprocessTriggered.has(triggerKey)) {
+                                console.log(`[Auto-Redrive] Triggering reprocess for ${mode}`);
+                                state.reprocessTriggered.add(triggerKey);
+                                fetch(`${API_BASE}/articles/${id}/reprocess`, {
+                                    method: 'POST',
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify({ parser: mode })
+                                }).catch(e => console.error("Auto-redrive failed", e));
+                            }
+
+                            setTimeout(() => app.setParser(mode), 3000);
+                            return;
+                        }
+                    } catch(e) { console.error(e); }
+                }
+
+                if (parserResult && parserResult.success) {
+                    els.rContent.innerHTML = parserResult.htmlContent || "<p>No content.</p>";
+                } else if (parserResult && !parserResult.success) {
+                    // Parser failed
+                    els.rContent.innerHTML = `<div class="text-red-400 text-center py-12">
+                        <p class="font-mono">Parser '${mode}' failed.</p>
+                        <p class="text-xs text-dim mt-2">${parserResult.error || 'Unknown error'}</p>
+                    </div>`;
+                } else {
+                     // Should be covered by polling block above, but fallback
+                     els.rContent.innerHTML = `<div class="text-cyan text-center py-12">
+                        <p class="font-mono">Parsing in progress...</p>
+                    </div>`;
+                }
+            },
+            
+            redriveParsing: async () => {
+                const id = state.currentArticleId;
+                const mode = state.currentParserMode;
+                if(!id || !mode || mode === 'original') return;
+                
+                if(els.redriveIcon) els.redriveIcon.classList.add('fa-spin');
+                
+                try {
+                    const response = await fetch(`${API_BASE}/articles/${id}/reprocess`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ parser: mode })
+                    });
+                    const result = await response.json();
+                    
+                    if(result.success) {
+                        setTimeout(() => {
+                            if(els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                            app.setParser(mode); 
+                        }, 2000);
+                    } else {
+                        alert("Failed to re-drive: " + result.error);
+                        if(els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                    }
+                } catch(e) {
+                    console.error(e);
+                    alert("Error re-driving parsing");
+                    if(els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
                 }
             },
 
