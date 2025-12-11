@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SVR // Article Archive</title>
-    
+
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
+
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
+
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -81,13 +81,13 @@
         .article-card[draggable="true"] { cursor: grab; }
         .article-card.dragging { opacity: 0.4; border-color: #00f3ff; box-shadow: 0 0 15px rgba(0, 243, 255, 0.2); transform: scale(0.98); }
         .drop-target { border-color: #00f3ff !important; background-color: rgba(0, 243, 255, 0.1) !important; box-shadow: inset 0 0 10px rgba(0, 243, 255, 0.2); }
-        
+
         /* Sidebar Item Styling */
         .sidebar-item { transition: all 0.2s; border-left: 2px solid transparent; }
         .sidebar-item:hover, .sidebar-item.active { background: rgba(255,255,255,0.03); color: white; }
         .sidebar-item.active { border-left-color: #00f3ff; color: #00f3ff; }
         .sidebar-item.drop-target { background: rgba(0, 243, 255, 0.15); color: #00f3ff; border-left-color: #00f3ff; }
-        
+
         /* Checkbox for Selection Mode */
         .custom-checkbox {
             appearance: none;
@@ -122,20 +122,20 @@
 
     <!-- GLOBAL HEADER -->
     <header class="fixed top-0 w-full bg-obsidian/90 backdrop-blur-md border-b border-border z-40 h-16 flex items-center justify-between px-6 lg:px-8">
-        <div class="flex items-center space-x-3 group cursor-pointer" onclick="app.goHome()">
+        <div class="flex items-center space-x-3 group cursor-pointer" id="header-home-btn">
             <div class="w-2 h-6 bg-cyan group-hover:shadow-neon transition-shadow"></div>
             <h1 class="font-mono font-bold text-lg tracking-widest text-white">SVR<span class="text-dim text-sm font-normal ml-2 hidden sm:inline">// ARCHIVE_NODE</span></h1>
         </div>
 
         <div class="flex items-center space-x-6">
-            <button onclick="app.refreshData()" class="text-dim hover:text-cyan transition-colors" title="Refresh Data">
+            <button id="refresh-btn" class="text-dim hover:text-cyan transition-colors" title="Refresh Data">
                 <i id="refresh-icon" class="fa-solid fa-arrows-rotate"></i>
             </button>
             <div class="flex items-center space-x-2">
                 <div id="status-indicator" class="w-2 h-2 rounded-full" title="Checking..."></div>
                 <span id="status-text" class="font-mono text-xs text-dim hidden sm:inline"></span>
             </div>
-            <button onclick="app.openBookmarkletModal()" class="flex items-center space-x-2 border border-border px-4 py-1.5 rounded hover:border-cyan hover:text-cyan transition-colors text-sm font-mono group">
+            <button id="bookmarklet-btn" class="flex items-center space-x-2 border border-border px-4 py-1.5 rounded hover:border-cyan hover:text-cyan transition-colors text-sm font-mono group">
                 <i class="fa-solid fa-bookmark text-xs"></i>
                 <span>BOOKMARKLET</span>
             </button>
@@ -144,22 +144,22 @@
 
     <!-- MAIN LAYOUT -->
     <div class="pt-16 min-h-screen flex max-w-[1600px] mx-auto w-full">
-        
+
         <!-- SIDEBAR (Navigation & Groups) -->
         <aside id="sidebar-panel" class="w-64 fixed lg:static top-16 bottom-0 left-0 bg-sidebar border-r border-border p-4 overflow-y-auto hidden lg:block z-30 transform transition-transform duration-300 -translate-x-full lg:translate-x-0">
-            
+
             <div class="mb-8">
                 <h3 class="font-mono text-[10px] text-dim mb-2 tracking-wider">LIBRARY</h3>
                 <nav class="space-y-1">
-                    <button onclick="app.setFilter('status', 'all')" class="sidebar-item w-full text-left px-3 py-2 text-sm font-mono text-dim rounded flex justify-between items-center group active" data-val="all">
+                    <button data-filter-status="all" class="sidebar-item w-full text-left px-3 py-2 text-sm font-mono text-dim rounded flex justify-between items-center group active" data-val="all">
                         <span>ALL DATA</span>
                         <span id="count-all" class="text-[10px] bg-obsidian px-1.5 py-0.5 rounded text-dim group-hover:text-white">0</span>
                     </button>
-                    <button onclick="app.setFilter('status', 'unread')" class="sidebar-item w-full text-left px-3 py-2 text-sm font-mono text-dim rounded flex justify-between items-center group" data-val="unread">
+                    <button data-filter-status="unread" class="sidebar-item w-full text-left px-3 py-2 text-sm font-mono text-dim rounded flex justify-between items-center group" data-val="unread">
                         <span>UNREAD</span>
                         <span id="count-unread" class="text-[10px] bg-obsidian px-1.5 py-0.5 rounded text-dim group-hover:text-white">0</span>
                     </button>
-                    <button onclick="app.setFilter('status', 'read')" class="sidebar-item w-full text-left px-3 py-2 text-sm font-mono text-dim rounded flex justify-between items-center group" data-val="read">
+                    <button data-filter-status="read" class="sidebar-item w-full text-left px-3 py-2 text-sm font-mono text-dim rounded flex justify-between items-center group" data-val="read">
                         <span>READ</span>
                         <span id="count-read" class="text-[10px] bg-obsidian px-1.5 py-0.5 rounded text-dim group-hover:text-white">0</span>
                     </button>
@@ -169,13 +169,12 @@
             <div>
                 <div class="flex justify-between items-center mb-2 px-1">
                     <h3 class="font-mono text-[10px] text-dim tracking-wider">RESEARCH GROUPS</h3>
-                    <button onclick="app.createNewGroup()" class="text-xs text-dim hover:text-cyan" title="New Group">
+                    <button id="create-group-btn" class="text-xs text-dim hover:text-cyan" title="New Group">
                         <i class="fa-solid fa-plus"></i>
                     </button>
                 </div>
-                
+
                 <div id="group-list" class="space-y-1">
-                    <!-- Groups Injected Here -->
                     <div class="text-center py-4 text-dim text-xs italic">Loading...</div>
                 </div>
             </div>
@@ -183,21 +182,21 @@
 
         <!-- CONTENT AREA -->
         <main class="flex-1 px-4 lg:px-8 py-8 w-full">
-            
+
             <!-- VIEW: LIBRARY -->
             <section id="view-library" class="fade-in block h-full">
-                
+
                 <!-- Tools Bar -->
                 <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-                    
+
                     <div class="flex items-center w-full md:w-auto space-x-4">
                         <!-- Mobile Menu Toggle -->
-                        <button class="lg:hidden text-dim hover:text-white" onclick="document.getElementById('sidebar-panel').classList.toggle('-translate-x-full')">
+                        <button id="mobile-menu-btn" class="lg:hidden text-dim hover:text-white">
                             <i class="fa-solid fa-bars"></i>
                         </button>
 
                         <!-- Selection Mode Toggle -->
-                        <button onclick="app.toggleSelectionMode()" id="select-mode-btn" class="text-xs font-mono border border-border px-3 py-1.5 rounded text-dim hover:text-white hover:border-white transition-colors flex items-center space-x-2">
+                        <button id="select-mode-btn" class="text-xs font-mono border border-border px-3 py-1.5 rounded text-dim hover:text-white hover:border-white transition-colors flex items-center space-x-2">
                             <i class="fa-regular fa-square-check"></i>
                             <span>SELECT</span>
                         </button>
@@ -208,9 +207,8 @@
                         </div>
                     </div>
 
-                    <!-- Search (Visual Only for now as requested by revert, kept simple) -->
                     <div class="font-mono text-xs text-dim">
-                        <!-- Placeholder for future search if re-added -->
+                        <!-- Placeholder for future search -->
                     </div>
                 </div>
 
@@ -225,34 +223,32 @@
 
             <!-- VIEW: READER -->
             <section id="view-reader" class="hidden fade-in max-w-3xl mx-auto">
-                <!-- Reading Progress Bar -->
                 <div class="fixed top-[64px] left-0 h-[2px] bg-cyan shadow-neon z-50 w-0" id="progress-bar"></div>
 
                 <!-- Reader Nav & Controls -->
                 <div class="flex justify-between items-center mb-8">
-                    <button onclick="app.goHome()" class="group flex items-center space-x-2 text-dim hover:text-cyan font-mono text-xs transition-colors">
+                    <button id="reader-back-btn" class="group flex items-center space-x-2 text-dim hover:text-cyan font-mono text-xs transition-colors">
                         <i class="fa-solid fa-arrow-left group-hover:-translate-x-1 transition-transform"></i>
                         <span>RETURN TO GRID</span>
                     </button>
 
                     <!-- Parser Controls -->
                     <div class="flex items-center space-x-4">
-                        <button onclick="app.redriveParsing()" title="Redrive Parsing" class="text-dim hover:text-cyan transition-colors">
+                        <button id="redrive-btn" title="Redrive Parsing" class="text-dim hover:text-cyan transition-colors">
                             <i id="redrive-icon" class="fa-solid fa-rotate-right text-xs"></i>
                         </button>
-                        
+
                         <div class="relative group">
                             <button class="flex items-center space-x-2 font-mono text-xs text-dim hover:text-white border border-border rounded px-3 py-1">
                                 <span id="current-parser-label">MODE: READABILITY</span>
                                 <i class="fa-solid fa-chevron-down text-[10px]"></i>
                             </button>
-                            <!-- Dropdown -->
-                            <div class="absolute right-0 mt-1 w-48 bg-cardbg border border-border rounded shadow-xl hidden group-hover:block z-50">
-                                <button onclick="app.setParser('readability')" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">READABILITY</button>
-                                <button onclick="app.setParser('defuddle')" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">DEFUDDLE</button>
-                                <button onclick="app.setParser('postlight')" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">POSTLIGHT</button>
-                                <button onclick="app.setParser('llm')" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">LLM</button>
-                                <button onclick="app.setParser('original')" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">RAW HTML</button>
+                            <div id="parser-dropdown" class="absolute right-0 mt-1 w-48 bg-cardbg border border-border rounded shadow-xl hidden group-hover:block z-50">
+                                <button data-parser="readability" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">READABILITY</button>
+                                <button data-parser="defuddle" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">DEFUDDLE</button>
+                                <button data-parser="postlight" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">POSTLIGHT</button>
+                                <button data-parser="llm" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">LLM</button>
+                                <button data-parser="original" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">RAW HTML</button>
                             </div>
                         </div>
                     </div>
@@ -267,7 +263,7 @@
                         <span class="mx-2">|</span>
                         <span id="reader-date">DATE</span>
                     </div>
-                    
+
                     <h1 id="reader-title" class="text-3xl md:text-5xl font-bold text-white leading-tight mb-6 font-sans">
                         Article Title
                     </h1>
@@ -289,12 +285,12 @@
 
                 <!-- Reader Footer -->
                 <div class="mt-16 pt-8 border-t border-border flex justify-between items-center">
-                    <button onclick="window.scrollTo({top: 0, behavior: 'smooth'})" class="text-dim hover:text-white font-mono text-xs">
+                    <button id="scroll-top-btn" class="text-dim hover:text-white font-mono text-xs">
                         [ SCROLL TO TOP ]
                     </button>
                     <div class="flex space-x-4">
                         <button class="text-dim hover:text-cyan font-mono text-xs" id="reader-mark-read">MARK READ</button>
-                        <button onclick="app.deleteCurrent()" class="text-dim hover:text-red-500 font-mono text-xs">DELETE</button>
+                        <button id="reader-delete-btn" class="text-dim hover:text-red-500 font-mono text-xs">DELETE</button>
                     </div>
                 </div>
             </section>
@@ -303,9 +299,8 @@
 
     <!-- MODAL: BOOKMARKLET -->
     <div id="modal-bookmarklet" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-        <!-- Bookmarklet content same as before -->
         <div class="bg-cardbg border border-border w-full max-w-2xl p-6 rounded shadow-2xl relative">
-            <button onclick="app.closeBookmarkletModal()" class="absolute top-4 right-4 text-dim hover:text-white">
+            <button id="close-bookmarklet-btn" class="absolute top-4 right-4 text-dim hover:text-white">
                 <i class="fa-solid fa-xmark"></i>
             </button>
             <h2 class="font-mono text-lg text-white mb-6 flex items-center">
@@ -328,12 +323,36 @@
 
     <!-- JAVASCRIPT LOGIC -->
     <script>
-        const API_BASE = window.location.origin;
+        'use strict';
+
+        // =============================================================================
+        // Constants
+        // =============================================================================
+
+        const CONFIG = {
+            API_BASE: window.location.origin,
+            TIMEOUTS: {
+                REFRESH_ANIMATION: 800,
+                REDRIVE_ANIMATION: 1000,
+                API_TIMEOUT: 5000,
+                HEALTH_CHECK_TIMEOUT: 3000
+            },
+            LIMITS: {
+                MAX_GROUP_NAME_LENGTH: 100,
+                MAX_TOPICS_PER_ARTICLE: 50
+            },
+            MOBILE_BREAKPOINT: 1024
+        };
+
+        // =============================================================================
+        // State Management
+        // =============================================================================
 
         const state = {
             articles: [],
             currentArticleId: null,
             currentParserMode: 'readability',
+            parserResults: null,
             filters: {
                 status: 'all',
                 topic: 'all'
@@ -345,27 +364,37 @@
             selectedIds: new Set()
         };
 
+        // =============================================================================
+        // DOM Elements Cache
+        // =============================================================================
+
         const els = {
+            // Sidebar
             sidebar: document.getElementById('sidebar-panel'),
+            groupList: document.getElementById('group-list'),
+            countAll: document.getElementById('count-all'),
+            countUnread: document.getElementById('count-unread'),
+            countRead: document.getElementById('count-read'),
+
+            // Views
             libraryView: document.getElementById('view-library'),
             readerView: document.getElementById('view-reader'),
             articleList: document.getElementById('article-list'),
-            groupList: document.getElementById('group-list'),
-            bookmarkletModal: document.getElementById('modal-bookmarklet'),
+
+            // Header
             statusIndicator: document.getElementById('status-indicator'),
-            progressBar: document.getElementById('progress-bar'),
+            statusText: document.getElementById('status-text'),
             refreshIcon: document.getElementById('refresh-icon'),
-            redriveIcon: document.getElementById('redrive-icon'),
-            currentParserLabel: document.getElementById('current-parser-label'),
+
             // Selection
             selectBtn: document.getElementById('select-mode-btn'),
             selectionActions: document.getElementById('selection-actions'),
             selectedCount: document.getElementById('selected-count'),
-            // Counters
-            countAll: document.getElementById('count-all'),
-            countUnread: document.getElementById('count-unread'),
-            countRead: document.getElementById('count-read'),
+
             // Reader
+            progressBar: document.getElementById('progress-bar'),
+            redriveIcon: document.getElementById('redrive-icon'),
+            currentParserLabel: document.getElementById('current-parser-label'),
             rTitle: document.getElementById('reader-title'),
             rSource: document.getElementById('reader-source'),
             rAuthor: document.getElementById('reader-author'),
@@ -373,140 +402,400 @@
             rTime: document.getElementById('reader-time'),
             rContent: document.getElementById('reader-content'),
             rTags: document.getElementById('reader-tags'),
-            rMarkRead: document.getElementById('reader-mark-read')
+            rMarkRead: document.getElementById('reader-mark-read'),
+
+            // Modal
+            bookmarkletModal: document.getElementById('modal-bookmarklet'),
+            bookmarkletLink: document.getElementById('bookmarklet-link')
         };
 
+        // =============================================================================
+        // Utility Functions
+        // =============================================================================
+
         const utils = {
-            formatDate: (timestamp) => {
-                if (!timestamp) return 'UNKNOWN';
-                const date = new Date(timestamp);
-                return date.toISOString().split('T')[0];
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
             },
-            safeHostname: (urlStr) => {
-                if(!urlStr) return 'UNKNOWN';
-                try { return new URL(urlStr).hostname.replace('www.', ''); } catch (e) { return 'SOURCE'; }
+
+            sanitizeHtml(html) {
+                // Basic sanitization - remove script tags and event handlers
+                // For production, consider using DOMPurify library
+                if (!html) return '';
+                return html
+                    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                    .replace(/on\w+="[^"]*"/g, '')
+                    .replace(/on\w+='[^']*'/g, '');
+            },
+
+            formatDate(timestamp) {
+                if (!timestamp) return 'UNKNOWN';
+                try {
+                    const date = new Date(timestamp);
+                    return date.toISOString().split('T')[0];
+                } catch (e) {
+                    console.error('Date formatting error:', e);
+                    return 'INVALID DATE';
+                }
+            },
+
+            safeHostname(urlStr) {
+                if (!urlStr) return 'UNKNOWN';
+                try {
+                    return new URL(urlStr).hostname.replace('www.', '');
+                } catch (e) {
+                    console.warn('Invalid URL:', urlStr);
+                    return 'SOURCE';
+                }
+            },
+
+            validateGroupName(name) {
+                if (!name || typeof name !== 'string') {
+                    return { valid: false, error: 'Group name is required' };
+                }
+                const trimmed = name.trim();
+                if (trimmed.length === 0) {
+                    return { valid: false, error: 'Group name cannot be empty' };
+                }
+                if (trimmed.length > CONFIG.LIMITS.MAX_GROUP_NAME_LENGTH) {
+                    return { valid: false, error: `Group name too long (max ${CONFIG.LIMITS.MAX_GROUP_NAME_LENGTH} chars)` };
+                }
+                return { valid: true, name: trimmed.toLowerCase() };
+            },
+
+            debounce(func, wait) {
+                let timeout;
+                return function executedFunction(...args) {
+                    const later = () => {
+                        clearTimeout(timeout);
+                        func(...args);
+                    };
+                    clearTimeout(timeout);
+                    timeout = setTimeout(later, wait);
+                };
             }
         };
 
-        window.app = {
-            init: async () => {
-                if (typeof db !== 'undefined' && db.init) {
-                    await db.init();
-                } else {
-                    console.error("IndexedDB wrapper 'db' is missing!");
-                }
+        // =============================================================================
+        // API Functions
+        // =============================================================================
 
-                const isOnline = await app.checkConnection();
-                if (isOnline) {
-                    await app.loadArticles();
-                } else {
-                    await app.loadArticlesFromCache();
+        const api = {
+            async checkConnection() {
+                try {
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => controller.abort(), CONFIG.TIMEOUTS.HEALTH_CHECK_TIMEOUT);
+
+                    const response = await fetch(`${CONFIG.API_BASE}/health`, {
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeout);
+                    return response.ok;
+                } catch (error) {
+                    console.warn('Connection check failed:', error);
+                    return false;
                 }
-                
-                // SW Setup
-                if ('serviceWorker' in navigator) {
-                    navigator.serviceWorker.register('/sw.js').catch(e => console.error(e));
+            },
+
+            async loadArticles() {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), CONFIG.TIMEOUTS.API_TIMEOUT);
+
+                try {
+                    const response = await fetch(`${CONFIG.API_BASE}/articles`, {
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeout);
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+
+                    return await response.json();
+                } catch (error) {
+                    clearTimeout(timeout);
+                    throw error;
                 }
-                
-                window.addEventListener('scroll', () => {
-                    if (els.readerView.classList.contains('hidden')) return;
-                    const scrollTop = window.scrollY;
-                    const docHeight = document.body.offsetHeight - window.innerHeight;
-                    const scrollPercent = (scrollTop / docHeight) * 100;
-                    els.progressBar.style.width = Math.min(100, Math.max(0, scrollPercent)) + '%';
+            },
+
+            async getArticle(id) {
+                const response = await fetch(`${CONFIG.API_BASE}/articles/${id}`);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch article: ${response.statusText}`);
+                }
+                return await response.json();
+            },
+
+            async updateArticle(id, data) {
+                const response = await fetch(`${CONFIG.API_BASE}/articles/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
                 });
 
-                app.generateBookmarklet();
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to update article');
+                }
+
+                return await response.json();
             },
 
-            checkConnection: async () => {
-                try {
-                    const response = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(3000) });
-                    return response.ok;
-                } catch { return false; }
+            async deleteArticle(id) {
+                const response = await fetch(`${CONFIG.API_BASE}/articles/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to delete article');
+                }
+
+                return await response.json();
             },
 
-            updateConnectionStatus: (isOnline) => {
+            async reprocessParser(id, parser) {
+                const response = await fetch(`${CONFIG.API_BASE}/articles/${id}/reprocess`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ parser })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to reprocess');
+                }
+
+                return await response.json();
+            },
+
+            async getArticleHtml(id) {
+                const response = await fetch(`${CONFIG.API_BASE}/articles/${id}/html`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch HTML');
+                }
+                return await response.text();
+            }
+        };
+
+        // =============================================================================
+        // UI Functions
+        // =============================================================================
+
+        const ui = {
+            updateConnectionStatus(isOnline) {
                 if (isOnline) {
                     els.statusIndicator.className = 'w-2 h-2 rounded-full bg-green-500 shadow-[0_0_10px_#22c55e]';
                     els.statusIndicator.title = "Online";
-                    document.getElementById('status-text').textContent = "ONLINE";
+                    if (els.statusText) els.statusText.textContent = "ONLINE";
                 } else {
                     els.statusIndicator.className = 'w-2 h-2 rounded-full bg-yellow-500 shadow-[0_0_10px_#fbbf24]';
                     els.statusIndicator.title = "Offline";
-                    document.getElementById('status-text').textContent = "OFFLINE";
+                    if (els.statusText) els.statusText.textContent = "OFFLINE";
                 }
             },
 
-            loadArticlesFromCache: async () => {
-                if (typeof db !== 'undefined') {
-                    state.articles = await db.getAllArticles();
-                    app.renderLibrary();
-                    app.renderGroupList();
-                }
+            showError(message) {
+                console.error(message);
+                // Could add toast notification here
+                alert(message);
             },
 
-            loadArticles: async () => {
+            showLoading(container, message = 'Loading...') {
+                if (!container) return;
+                container.innerHTML = `
+                    <div class="col-span-full flex flex-col items-center justify-center py-20 opacity-50">
+                        <div class="loader mb-4"></div>
+                        <p class="font-mono text-xs">${utils.escapeHtml(message)}</p>
+                    </div>
+                `;
+            },
+
+            showEmpty(container, message = 'NO ARTICLES FOUND') {
+                if (!container) return;
+                container.innerHTML = `
+                    <div class="col-span-full flex flex-col items-center justify-center py-20 border border-dashed border-border rounded text-dim">
+                        <p class="font-mono text-sm mb-4">${utils.escapeHtml(message)}</p>
+                    </div>
+                `;
+            }
+        };
+
+        // =============================================================================
+        // App Functions
+        // =============================================================================
+
+        const app = {
+            async init() {
                 try {
-                    const response = await fetch(`${API_BASE}/articles`, { signal: AbortSignal.timeout(5000) });
-                    const articles = await response.json();
+                    // Initialize IndexedDB
+                    if (typeof db !== 'undefined' && db.init) {
+                        await db.init();
+                    }
+
+                    // Check connection and load data
+                    const isOnline = await api.checkConnection();
+                    if (isOnline) {
+                        await app.loadArticles();
+                    } else {
+                        await app.loadArticlesFromCache();
+                    }
+
+                    // Service Worker
+                    if ('serviceWorker' in navigator) {
+                        navigator.serviceWorker.register('/sw.js').catch(e =>
+                            console.error('Service worker registration failed:', e)
+                        );
+                    }
+
+                    // Setup event listeners
+                    app.setupEventListeners();
+
+                    // Generate bookmarklet
+                    app.generateBookmarklet();
+
+                } catch (error) {
+                    console.error('Initialization error:', error);
+                    ui.showError('Failed to initialize application');
+                }
+            },
+
+            setupEventListeners() {
+                // Header
+                document.getElementById('header-home-btn')?.addEventListener('click', () => app.goHome());
+                document.getElementById('refresh-btn')?.addEventListener('click', () => app.refreshData());
+                document.getElementById('bookmarklet-btn')?.addEventListener('click', () => app.openBookmarkletModal());
+                document.getElementById('close-bookmarklet-btn')?.addEventListener('click', () => app.closeBookmarkletModal());
+
+                // Sidebar
+                document.getElementById('mobile-menu-btn')?.addEventListener('click', () => {
+                    els.sidebar?.classList.toggle('-translate-x-full');
+                });
+                document.getElementById('create-group-btn')?.addEventListener('click', () => app.createNewGroup());
+
+                document.querySelectorAll('[data-filter-status]').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const status = e.currentTarget.dataset.filterStatus;
+                        app.setFilter('status', status);
+                    });
+                });
+
+                // Selection
+                document.getElementById('select-mode-btn')?.addEventListener('click', () => app.toggleSelectionMode());
+
+                // Reader
+                document.getElementById('reader-back-btn')?.addEventListener('click', () => app.goHome());
+                document.getElementById('redrive-btn')?.addEventListener('click', () => app.redriveParsing());
+                document.getElementById('scroll-top-btn')?.addEventListener('click', () => {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                });
+                document.getElementById('reader-delete-btn')?.addEventListener('click', () => app.deleteCurrent());
+
+                // Parser dropdown
+                document.querySelectorAll('[data-parser]').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const parser = e.currentTarget.dataset.parser;
+                        app.setParser(parser);
+                    });
+                });
+
+                // Scroll progress
+                window.addEventListener('scroll', () => {
+                    if (els.readerView?.classList.contains('hidden')) return;
+                    const scrollTop = window.scrollY;
+                    const docHeight = document.body.offsetHeight - window.innerHeight;
+                    const scrollPercent = (scrollTop / docHeight) * 100;
+                    if (els.progressBar) {
+                        els.progressBar.style.width = Math.min(100, Math.max(0, scrollPercent)) + '%';
+                    }
+                });
+            },
+
+            async loadArticlesFromCache() {
+                try {
+                    if (typeof db !== 'undefined') {
+                        state.articles = await db.getAllArticles();
+                        app.renderLibrary();
+                        app.renderGroupList();
+                    }
+                } catch (error) {
+                    console.error('Failed to load from cache:', error);
+                }
+            },
+
+            async loadArticles() {
+                try {
+                    const articles = await api.loadArticles();
+
+                    // Cache articles
                     if (typeof db !== 'undefined') {
                         await db.saveArticles(articles);
                     }
+
                     state.articles = articles;
-                    app.updateConnectionStatus(true);
+                    ui.updateConnectionStatus(true);
                     app.renderLibrary();
                     app.renderGroupList();
                 } catch (error) {
-                    console.warn("Network failed, cache fallback", error);
-                    app.updateConnectionStatus(false);
+                    console.warn("Network failed, using cache fallback", error);
+                    ui.updateConnectionStatus(false);
                     await app.loadArticlesFromCache();
                 }
             },
-            
-            refreshData: () => {
-                if(els.refreshIcon) els.refreshIcon.classList.add('fa-spin');
-                app.loadArticles();
-                setTimeout(() => { if(els.refreshIcon) els.refreshIcon.classList.remove('fa-spin'); }, 800);
+
+            refreshData() {
+                if (els.refreshIcon) els.refreshIcon.classList.add('fa-spin');
+
+                app.loadArticles().finally(() => {
+                    setTimeout(() => {
+                        if (els.refreshIcon) els.refreshIcon.classList.remove('fa-spin');
+                    }, CONFIG.TIMEOUTS.REFRESH_ANIMATION);
+                });
             },
 
-            // --- SELECTION ---
-
-            toggleSelectionMode: () => {
+            // Selection Mode
+            toggleSelectionMode() {
                 state.selectionMode = !state.selectionMode;
                 state.selectedIds.clear();
-                
-                if(state.selectionMode) {
-                    els.selectBtn.classList.add('bg-cyan/10', 'border-cyan', 'text-cyan');
-                    els.selectionActions.classList.remove('hidden');
+
+                if (state.selectionMode) {
+                    els.selectBtn?.classList.add('bg-cyan/10', 'border-cyan', 'text-cyan');
+                    els.selectionActions?.classList.remove('hidden');
                 } else {
-                    els.selectBtn.classList.remove('bg-cyan/10', 'border-cyan', 'text-cyan');
-                    els.selectionActions.classList.add('hidden');
+                    els.selectBtn?.classList.remove('bg-cyan/10', 'border-cyan', 'text-cyan');
+                    els.selectionActions?.classList.add('hidden');
                 }
+
                 app.renderLibrary();
                 app.updateSelectedCount();
             },
 
-            toggleSelectArticle: (id, e) => {
+            toggleSelectArticle(id, e) {
                 e.stopPropagation();
-                if(state.selectedIds.has(id)) {
+
+                if (state.selectedIds.has(id)) {
                     state.selectedIds.delete(id);
                 } else {
                     state.selectedIds.add(id);
                 }
+
                 app.renderLibrary();
                 app.updateSelectedCount();
             },
 
-            updateSelectedCount: () => {
-                els.selectedCount.textContent = state.selectedIds.size;
+            updateSelectedCount() {
+                if (els.selectedCount) {
+                    els.selectedCount.textContent = state.selectedIds.size;
+                }
             },
 
-            // --- FILTER & GROUP LOGIC ---
-
-            setFilter: (type, val) => {
-                if(type === 'status') {
-                    state.filters.topic = 'all'; 
+            // Filters
+            setFilter(type, val) {
+                if (type === 'status') {
+                    state.filters.topic = 'all';
                     state.filters.status = val;
                 } else if (type === 'topic') {
                     state.filters.status = 'all';
@@ -514,138 +803,177 @@
                 }
 
                 document.querySelectorAll('.sidebar-item').forEach(el => {
-                    if(el.dataset.val === val || (type === 'topic' && el.dataset.topic === val)) {
+                    const matchesStatus = el.dataset.val === val;
+                    const matchesTopic = type === 'topic' && el.dataset.topic === val;
+
+                    if (matchesStatus || matchesTopic) {
                         el.classList.add('active');
                     } else {
                         el.classList.remove('active');
                     }
                 });
-                
+
                 // Close sidebar on mobile
-                if(window.innerWidth < 1024) {
+                if (window.innerWidth < CONFIG.MOBILE_BREAKPOINT && els.sidebar) {
                     els.sidebar.classList.add('-translate-x-full');
                 }
 
                 app.renderLibrary();
             },
 
-            getFilteredArticles: () => {
+            getFilteredArticles() {
                 return state.articles.filter(a => {
                     if (state.filters.status === 'read' && a.status !== 'read') return false;
                     if (state.filters.status === 'unread' && a.status === 'read') return false;
-                    
+
                     if (state.filters.topic !== 'all') {
                         const topics = a.topics || [];
                         if (!topics.includes(state.filters.topic)) return false;
                     }
+
                     return true;
                 });
             },
 
-            createNewGroup: () => {
+            // Groups
+            createNewGroup() {
                 const name = prompt("Enter new Group Name:");
-                if(!name) return;
-                const cleanName = name.trim().toLowerCase();
-                if(!state.customGroups.includes(cleanName)) {
+                if (!name) return;
+
+                const validation = utils.validateGroupName(name);
+                if (!validation.valid) {
+                    ui.showError(validation.error);
+                    return;
+                }
+
+                const cleanName = validation.name;
+                if (!state.customGroups.includes(cleanName)) {
                     state.customGroups.push(cleanName);
                 }
+
                 app.renderGroupList();
             },
 
-            renderGroupList: () => {
+            renderGroupList() {
+                if (!els.groupList) return;
+
                 const allTopics = new Set(state.customGroups);
-                state.articles.forEach(a => (a.topics||[]).forEach(t => allTopics.add(t)));
+                state.articles.forEach(a => {
+                    const topics = a.topics || [];
+                    topics.forEach(t => allTopics.add(t));
+                });
+
                 const sortedTopics = Array.from(allTopics).sort();
 
+                if (sortedTopics.length === 0) {
+                    els.groupList.innerHTML = '<div class="text-center py-4 text-dim text-xs italic">No groups yet.</div>';
+                    return;
+                }
+
                 let html = '';
-                sortedTopics.forEach(t => {
-                    const count = state.articles.filter(a => (a.topics||[]).includes(t)).length;
-                    const isActive = state.filters.topic === t;
+                sortedTopics.forEach(topic => {
+                    const count = state.articles.filter(a => (a.topics || []).includes(topic)).length;
+                    const isActive = state.filters.topic === topic;
+                    const escapedTopic = utils.escapeHtml(topic);
+
                     html += `
-                        <button 
-                            onclick="app.setFilter('topic', '${t}')"
-                            ondragover="app.handleDragOver(event)"
-                            ondrop="app.handleDropOnGroup(event, '${t}')"
-                            ondragleave="app.handleDragLeave(event)"
+                        <button
+                            data-filter-topic="${escapedTopic}"
+                            data-topic="${escapedTopic}"
                             class="sidebar-item w-full text-left px-3 py-2 text-sm font-mono text-dim rounded flex justify-between items-center group ${isActive ? 'active' : ''}"
-                            data-topic="${t}"
                         >
-                            <span class="truncate pr-2"># ${t.toUpperCase()}</span>
+                            <span class="truncate pr-2"># ${escapedTopic.toUpperCase()}</span>
                             <span class="text-[10px] bg-obsidian px-1.5 py-0.5 rounded text-dim group-hover:text-white">${count}</span>
                         </button>
                     `;
                 });
-                els.groupList.innerHTML = html || `<div class="text-center py-4 text-dim text-xs italic">No groups yet.</div>`;
-                
-                // Update Counts
-                els.countAll.textContent = state.articles.length;
-                els.countUnread.textContent = state.articles.filter(a => a.status !== 'read').length;
-                els.countRead.textContent = state.articles.filter(a => a.status === 'read').length;
+
+                els.groupList.innerHTML = html;
+
+                // Add event listeners to new group buttons
+                document.querySelectorAll('[data-filter-topic]').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const topic = e.currentTarget.dataset.filterTopic;
+                        app.setFilter('topic', topic);
+                    });
+
+                    // Drag and drop
+                    btn.addEventListener('dragover', (e) => app.handleDragOver(e));
+                    btn.addEventListener('drop', (e) => {
+                        const topic = e.currentTarget.dataset.filterTopic;
+                        app.handleDropOnGroup(e, topic);
+                    });
+                    btn.addEventListener('dragleave', (e) => app.handleDragLeave(e));
+                });
+
+                // Update counts
+                if (els.countAll) els.countAll.textContent = state.articles.length;
+                if (els.countUnread) els.countUnread.textContent = state.articles.filter(a => a.status !== 'read').length;
+                if (els.countRead) els.countRead.textContent = state.articles.filter(a => a.status === 'read').length;
             },
 
-            // --- DRAG & DROP ---
-
-            handleDragStart: (e, id) => {
-                // If dragging a selected item, we drag ALL selected items
-                if(state.selectionMode && state.selectedIds.has(id)) {
+            // Drag & Drop
+            handleDragStart(e, id) {
+                if (state.selectionMode && state.selectedIds.has(id)) {
                     state.draggingIds = Array.from(state.selectedIds);
                     e.dataTransfer.setData('text/plain', `${state.draggingIds.length} items`);
                 } else {
-                    // Dragging a single unselected item
                     state.draggingIds = [id];
                     e.dataTransfer.setData('text/plain', '1 item');
                 }
 
                 e.dataTransfer.effectAllowed = 'copyMove';
+
                 setTimeout(() => {
-                    // Visually dim all dragged items
                     state.draggingIds.forEach(dId => {
                         const card = document.getElementById(`card-${dId}`);
-                        if(card) card.classList.add('dragging');
+                        if (card) card.classList.add('dragging');
                     });
                 }, 0);
             },
 
-            handleDragEnd: (e) => {
+            handleDragEnd(e) {
                 state.draggingIds.forEach(id => {
                     const card = document.getElementById(`card-${id}`);
-                    if(card) card.classList.remove('dragging');
+                    if (card) card.classList.remove('dragging');
                 });
                 state.draggingIds = [];
                 document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
             },
 
-            handleDragOver: (e) => {
+            handleDragOver(e) {
                 e.preventDefault();
                 e.currentTarget.classList.add('drop-target');
             },
 
-            handleDragLeave: (e) => {
+            handleDragLeave(e) {
                 e.currentTarget.classList.remove('drop-target');
             },
 
-            handleDropOnGroup: async (e, topic) => {
+            async handleDropOnGroup(e, topic) {
                 e.preventDefault();
                 e.currentTarget.classList.remove('drop-target');
-                
-                const ids = state.draggingIds;
-                if(ids.length === 0) return;
 
-                // Optimistic & Backend Update for ALL items
+                const ids = state.draggingIds;
+                if (ids.length === 0) return;
+
                 const promises = ids.map(async (id) => {
                     const article = state.articles.find(a => a.id === id);
-                    if(!article) return;
+                    if (!article) return;
 
                     let newTopics = article.topics || [];
-                    if(!newTopics.includes(topic)) {
-                        newTopics.push(topic);
-                        article.topics = newTopics; // Optimistic
-                        
-                        return fetch(`${API_BASE}/articles/${id}`, {
-                            method: 'PATCH',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({ topics: newTopics })
-                        });
+                    if (!newTopics.includes(topic)) {
+                        newTopics = [...newTopics, topic];  // Create new array for immutability
+                        article.topics = newTopics; // Optimistic update
+
+                        try {
+                            await api.updateArticle(id, { topics: newTopics });
+                        } catch (error) {
+                            console.error(`Failed to update article ${id}:`, error);
+                            // Revert on error
+                            article.topics = article.topics.filter(t => t !== topic);
+                            throw error;
+                        }
                     }
                 });
 
@@ -653,239 +981,343 @@
                     await Promise.all(promises);
                     app.renderLibrary();
                     app.renderGroupList();
-                    
-                    // Optional: Clear selection after drop?
-                    // state.selectedIds.clear();
-                    // app.toggleSelectionMode();
-                } catch(err) { console.error("Failed to update topics", err); }
+                } catch (err) {
+                    ui.showError("Failed to update some articles");
+                }
             },
 
-            // --- RENDER ---
+            // Rendering
+            renderLibrary() {
+                if (!els.articleList) return;
 
-            renderLibrary: () => {
                 const filtered = app.getFilteredArticles();
                 els.articleList.innerHTML = '';
 
                 if (filtered.length === 0) {
-                    els.articleList.innerHTML = `
-                        <div class="col-span-full flex flex-col items-center justify-center py-20 border border-dashed border-border rounded text-dim">
-                            <p class="font-mono text-sm mb-4">NO ARTICLES FOUND</p>
-                        </div>
-                    `;
+                    ui.showEmpty(els.articleList);
                     return;
                 }
 
                 filtered.forEach(article => {
                     const isRead = article.status === 'read';
                     const isSelected = state.selectedIds.has(article.id);
-                    
+
                     const card = document.createElement('article');
                     card.id = `card-${article.id}`;
                     card.setAttribute('draggable', 'true');
-                    card.ondragstart = (e) => app.handleDragStart(e, article.id);
-                    card.ondragend = (e) => app.handleDragEnd(e);
-                    
                     card.className = `article-card group relative bg-cardbg border ${isSelected ? 'border-cyan' : 'border-border'} rounded p-5 transition-all duration-200 hover:shadow-neon cursor-grab flex flex-col h-full ${isRead ? 'opacity-60 hover:opacity-100' : ''}`;
-                    
-                    const tags = (article.topics || []).map(t => `<span class="text-[10px] text-cyan mr-2">#${t}</span>`).join('');
+
+                    // Build tags HTML safely
+                    const tags = (article.topics || [])
+                        .map(t => `<span class="text-[10px] text-cyan mr-2">#${utils.escapeHtml(t)}</span>`)
+                        .join('');
+
+                    // Sanitize snippet
+                    const snippet = utils.escapeHtml(article.snippet || "No preview.");
+                    const title = utils.escapeHtml(article.title);
+                    const hostname = utils.escapeHtml(utils.safeHostname(article.source || article.archive_url));
+                    const readTime = utils.escapeHtml(article.readTime || '3m');
+                    const date = utils.escapeHtml(utils.formatDate(article.captured_at));
 
                     card.innerHTML = `
-                        <!-- Selection Checkbox -->
                         <div class="absolute top-4 right-4 z-10 ${state.selectionMode ? 'block' : 'hidden'}">
-                            <div class="custom-checkbox ${isSelected ? 'checked' : ''}" onclick="app.toggleSelectArticle(${article.id}, event)"></div>
+                            <div class="custom-checkbox ${isSelected ? 'checked' : ''}" data-article-id="${article.id}"></div>
                             ${isSelected ? '<i class="fa-solid fa-check text-[10px] text-cyan absolute inset-0 m-auto pointer-events-none"></i>' : ''}
                         </div>
 
                         <div class="flex justify-between items-start mb-2 pointer-events-none">
                             <h2 class="text-lg font-semibold text-gray-100 group-hover:text-white transition-colors leading-tight pr-8 line-clamp-2">
-                                ${article.title}
+                                ${title}
                             </h2>
                         </div>
+
                         <div class="flex items-center space-x-2 mb-2 font-mono text-[10px] text-dim tracking-wider uppercase pointer-events-none">
-                            <span class="text-cyan truncate max-w-[100px]">${utils.safeHostname(article.source || article.archive_url)}</span>
+                            <span class="text-cyan truncate max-w-[100px]">${hostname}</span>
                             <span class="text-dim">|</span>
-                            <span class="font-bold">${article.readTime || '3m'}</span>
+                            <span class="font-bold">${readTime}</span>
                         </div>
+
                         <div class="mb-4 font-mono pointer-events-none">${tags}</div>
+
                         <div class="relative flex-grow pointer-events-none">
                              <p class="text-sm text-gray-400 leading-relaxed mb-6 line-clamp-3 border-l-2 border-transparent group-hover:border-cyan pl-0 group-hover:pl-3 transition-all duration-300">
-                                ${article.snippet || "No preview."}
+                                ${snippet}
                             </p>
                         </div>
+
                         <div class="flex justify-between items-center pt-4 border-t border-border group-hover:border-gray-800 transition-colors mt-auto">
                             <div class="font-mono text-[10px] text-dim flex items-center pointer-events-none">
                                 ${isRead ? '<i class="fa-solid fa-check mr-2 text-green-500"></i>' : ''}
-                                ${utils.formatDate(article.captured_at)}
+                                ${date}
                             </div>
+
                             <div class="flex space-x-3 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                                <button onclick="event.stopPropagation(); app.toggleReadStatus(${article.id}, ${!isRead})" class="text-xs font-mono text-dim hover:text-white flex items-center transition-colors">
+                                <button data-action="toggle-read" data-article-id="${article.id}" class="text-xs font-mono text-dim hover:text-white flex items-center transition-colors">
                                     <i class="fa-${isRead ? 'regular' : 'solid'} fa-circle-check"></i>
                                 </button>
-                                <button onclick="event.stopPropagation(); app.openReader(${article.id})" class="text-xs font-mono font-bold text-dim hover:text-cyan flex items-center transition-colors">
+                                <button data-action="read" data-article-id="${article.id}" class="text-xs font-mono font-bold text-dim hover:text-cyan flex items-center transition-colors">
                                     [ READ ]
                                 </button>
-                                <button onclick="event.stopPropagation(); app.deleteArticle(${article.id})" class="text-xs font-mono text-dim hover:text-red-400 flex items-center transition-colors">
+                                <button data-action="delete" data-article-id="${article.id}" class="text-xs font-mono text-dim hover:text-red-400 flex items-center transition-colors">
                                     <i class="fa-solid fa-trash"></i>
                                 </button>
                             </div>
                         </div>
                     `;
-                    
-                    card.onclick = (e) => {
-                        if(state.selectionMode) {
+
+                    // Event listeners
+                    card.addEventListener('dragstart', (e) => app.handleDragStart(e, article.id));
+                    card.addEventListener('dragend', (e) => app.handleDragEnd(e));
+
+                    card.addEventListener('click', (e) => {
+                        if (state.selectionMode) {
                             app.toggleSelectArticle(article.id, e);
                         } else {
                             app.openReader(article.id);
                         }
-                    };
+                    });
+
+                    // Add event listeners to buttons
+                    const checkbox = card.querySelector('.custom-checkbox');
+                    if (checkbox) {
+                        checkbox.addEventListener('click', (e) => app.toggleSelectArticle(article.id, e));
+                    }
+
+                    const toggleReadBtn = card.querySelector('[data-action="toggle-read"]');
+                    if (toggleReadBtn) {
+                        toggleReadBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            app.toggleReadStatus(article.id, !isRead);
+                        });
+                    }
+
+                    const readBtn = card.querySelector('[data-action="read"]');
+                    if (readBtn) {
+                        readBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            app.openReader(article.id);
+                        });
+                    }
+
+                    const deleteBtn = card.querySelector('[data-action="delete"]');
+                    if (deleteBtn) {
+                        deleteBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            app.deleteArticle(article.id);
+                        });
+                    }
+
                     els.articleList.appendChild(card);
                 });
             },
 
-            openReader: async (id) => {
+            // Reader
+            async openReader(id) {
                 try {
-                    const response = await fetch(`${API_BASE}/articles/${id}`);
-                    if (!response.ok) throw new Error("Failed to fetch article");
-                    
-                    const article = await response.json();
-                    
+                    const article = await api.getArticle(id);
+
+                    // Cache article
                     if (typeof db !== 'undefined') {
-                        try { await db.saveArticle(article); } 
-                        catch(e) { console.warn("Failed to cache article", e); }
+                        try {
+                            await db.saveArticle(article);
+                        } catch (e) {
+                            console.warn("Failed to cache article", e);
+                        }
                     }
 
                     state.currentArticleId = id;
                     state.parserResults = article.parser_results || {};
-                    if(state.reprocessTriggered) state.reprocessTriggered.clear();
+                    state.reprocessTriggered.clear();
 
-                    els.rTitle.textContent = article.title;
-                    els.rSource.textContent = utils.safeHostname(article.source || article.archive_url);
-                    els.rAuthor.textContent = article.author || 'UNKNOWN';
-                    els.rDate.textContent = utils.formatDate(article.captured_at);
-                    els.rTime.textContent = (article.readTime || '5m') + ' READ';
-                    els.rContent.innerHTML = article.content || "<p>Content loading error.</p>";
-                    els.rTags.innerHTML = (article.topics || []).map(t => `<span class="tag-pill ml-2">${t.toUpperCase()}</span>`).join('');
-                    
+                    // Populate reader (with sanitization)
+                    if (els.rTitle) els.rTitle.textContent = article.title;
+                    if (els.rSource) els.rSource.textContent = utils.safeHostname(article.source || article.archive_url);
+                    if (els.rAuthor) els.rAuthor.textContent = article.author || 'UNKNOWN';
+                    if (els.rDate) els.rDate.textContent = utils.formatDate(article.captured_at);
+                    if (els.rTime) els.rTime.textContent = (article.readTime || '5m') + ' READ';
+
+                    // Sanitize and set content
+                    if (els.rContent) {
+                        const sanitized = utils.sanitizeHtml(article.content || "");
+                        els.rContent.innerHTML = sanitized || "<p>Content loading error.</p>";
+                    }
+
+                    // Tags
+                    if (els.rTags) {
+                        const tagsHtml = (article.topics || [])
+                            .map(t => `<span class="tag-pill ml-2">${utils.escapeHtml(t.toUpperCase())}</span>`)
+                            .join('');
+                        els.rTags.innerHTML = tagsHtml;
+                    }
+
+                    // Mark read button
                     const isRead = article.status === 'read';
-                    els.rMarkRead.textContent = isRead ? "MARK UNREAD" : "MARK READ";
-                    els.rMarkRead.onclick = () => app.toggleReadStatus(id, !isRead);
+                    if (els.rMarkRead) {
+                        els.rMarkRead.textContent = isRead ? "MARK UNREAD" : "MARK READ";
+                        els.rMarkRead.onclick = () => app.toggleReadStatus(id, !isRead);
+                    }
 
+                    // Set parser mode
                     app.setParser('readability');
-                    els.libraryView.classList.add('hidden');
-                    els.readerView.classList.remove('hidden');
-                    els.sidebar.classList.add('hidden');
+
+                    // Show reader view
+                    els.libraryView?.classList.add('hidden');
+                    els.readerView?.classList.remove('hidden');
+                    els.sidebar?.classList.add('hidden');
                     window.scrollTo(0, 0);
-                } catch (error) { 
-                    console.error(error); 
-                    alert("Error opening article: " + error.message);
+
+                } catch (error) {
+                    console.error('Error opening article:', error);
+                    ui.showError("Error opening article: " + error.message);
                 }
             },
 
-            goHome: () => {
-                els.readerView.classList.add('hidden');
-                els.libraryView.classList.remove('hidden');
-                els.sidebar.classList.remove('hidden');
+            goHome() {
+                els.readerView?.classList.add('hidden');
+                els.libraryView?.classList.remove('hidden');
+                els.sidebar?.classList.remove('hidden');
                 state.currentArticleId = null;
-                els.progressBar.style.width = '0%';
+                if (els.progressBar) els.progressBar.style.width = '0%';
             },
 
-            toggleReadStatus: async (id, markAsRead) => {
+            async toggleReadStatus(id, markAsRead) {
+                if (!id) return;
+
                 const status = markAsRead ? 'read' : 'unread';
-                
-                // Optimistic Update
+
+                // Optimistic update
                 const article = state.articles.find(a => a.id === id);
-                if(article) {
+                if (article) {
+                    const oldStatus = article.status;
                     article.status = status;
                     app.renderLibrary();
-                    app.renderGroupList(); // Update counts
-                    
-                    if(state.currentArticleId === id) {
+                    app.renderGroupList();
+
+                    if (state.currentArticleId === id && els.rMarkRead) {
                         els.rMarkRead.textContent = markAsRead ? "MARK UNREAD" : "MARK READ";
                         els.rMarkRead.onclick = () => app.toggleReadStatus(id, !markAsRead);
                     }
-                }
 
-                try {
-                    await fetch(`${API_BASE}/articles/${id}`, {
-                        method: 'PATCH',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ status })
-                    });
-                } catch(e) { console.error("Status update failed", e); }
+                    try {
+                        await api.updateArticle(id, { status });
+                    } catch (error) {
+                        // Revert on error
+                        article.status = oldStatus;
+                        app.renderLibrary();
+                        app.renderGroupList();
+                        ui.showError("Failed to update status");
+                    }
+                }
             },
 
-            // --- PARSER LOGIC (Existing) ---
-            setParser: async (mode) => {
+            async setParser(mode) {
                 state.currentParserMode = mode;
-                els.currentParserLabel.textContent = `MODE: ${mode.toUpperCase()}`;
-                
+
+                if (els.currentParserLabel) {
+                    els.currentParserLabel.textContent = `MODE: ${mode.toUpperCase()}`;
+                }
+
                 const id = state.currentArticleId;
-                if(!id) return;
+                if (!id || !els.rContent) return;
 
                 if (mode === 'original') {
                     try {
-                        const response = await fetch(`${API_BASE}/articles/${id}/html`);
-                        const htmlText = await response.text();
-                        els.rContent.innerHTML = `<iframe srcdoc="${htmlText.replace(/"/g, '&quot;')}" style="width:100%; min-height:800px; border:none; background:white;" sandbox="allow-same-origin"></iframe>`;
-                    } catch (e) { els.rContent.innerHTML = "<p class='text-red-400'>Failed to load HTML.</p>"; }
+                        const htmlText = await api.getArticleHtml(id);
+                        // Use iframe for safety
+                        const escapedHtml = htmlText.replace(/"/g, '&quot;');
+                        els.rContent.innerHTML = `<iframe srcdoc="${escapedHtml}" style="width:100%; min-height:800px; border:none; background:white;" sandbox="allow-same-origin"></iframe>`;
+                    } catch (e) {
+                        console.error('Failed to load HTML:', e);
+                        els.rContent.innerHTML = "<p class='text-red-400'>Failed to load HTML.</p>";
+                    }
                     return;
                 }
 
                 if (mode === 'llm') {
-                    // Logic to handle LLM loading/polling...
-                    // (Simplified for brevity, assuming existing logic fits)
                     const article = state.articles.find(a => a.id === id);
-                    if(article && article.llm_content) els.rContent.innerHTML = article.llm_content;
-                    else els.rContent.innerHTML = `<div class="text-center py-12">Loading AI content...</div>`;
+                    if (article && article.llm_content) {
+                        els.rContent.innerHTML = utils.sanitizeHtml(article.llm_content);
+                    } else {
+                        els.rContent.innerHTML = `<div class="text-center py-12">Loading AI content...</div>`;
+                    }
                     return;
                 }
 
-                let parserResult = state.parserResults ? state.parserResults[mode] : null;
-                if(parserResult && parserResult.success) {
-                    els.rContent.innerHTML = parserResult.htmlContent;
+                // Regular parser
+                const parserResult = state.parserResults ? state.parserResults[mode] : null;
+                if (parserResult && parserResult.success && parserResult.htmlContent) {
+                    els.rContent.innerHTML = utils.sanitizeHtml(parserResult.htmlContent);
                 } else {
-                    // Trigger redrive if missing logic
                     els.rContent.innerHTML = `<div class="text-center py-12 text-dim">Parser content not available.</div>`;
                 }
             },
 
-            redriveParsing: async () => {
+            async redriveParsing() {
                 const id = state.currentArticleId;
                 const mode = state.currentParserMode;
-                if(els.redriveIcon) els.redriveIcon.classList.add('fa-spin');
-                
+
+                if (!id) return;
+
+                if (els.redriveIcon) els.redriveIcon.classList.add('fa-spin');
+
                 try {
-                    await fetch(`${API_BASE}/articles/${id}/reprocess`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ parser: mode })
-                    });
+                    await api.reprocessParser(id, mode);
+
                     setTimeout(() => {
-                        if(els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
-                        // Ideally poll here, but for now just wait
-                    }, 2000);
-                } catch(e) { console.error(e); }
+                        if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                    }, CONFIG.TIMEOUTS.REDRIVE_ANIMATION);
+                } catch (error) {
+                    console.error('Redrive failed:', error);
+                    if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                    ui.showError("Failed to reprocess: " + error.message);
+                }
             },
 
-            deleteArticle: async (id) => {
-                if(!confirm("Delete article?")) return;
+            async deleteArticle(id) {
+                if (!confirm("Delete article?")) return;
+
                 try {
-                    await fetch(`${API_BASE}/articles/${id}`, {method: 'DELETE'});
-                    if (typeof db !== 'undefined') await db.deleteArticle(id);
+                    await api.deleteArticle(id);
+
+                    if (typeof db !== 'undefined') {
+                        await db.deleteArticle(id);
+                    }
+
                     state.articles = state.articles.filter(a => a.id !== id);
                     app.renderLibrary();
                     app.renderGroupList();
-                } catch(e) { console.error(e); }
+                } catch (error) {
+                    console.error('Delete failed:', error);
+                    ui.showError("Failed to delete article");
+                }
             },
-            
-            deleteCurrent: async () => { if(state.currentArticleId) { await app.deleteArticle(state.currentArticleId); app.goHome(); } },
-            openBookmarkletModal: () => els.bookmarkletModal.classList.remove('hidden'),
-            closeBookmarkletModal: () => els.bookmarkletModal.classList.add('hidden'),
-            generateBookmarklet: () => {
-                // (Bookmarklet logic from before)
-                document.getElementById('bookmarklet-link').href = 'javascript:(function(){window.open("'+API_BASE+'/save?url="+encodeURIComponent(window.location.href))})();';
+
+            async deleteCurrent() {
+                if (state.currentArticleId) {
+                    await app.deleteArticle(state.currentArticleId);
+                    app.goHome();
+                }
+            },
+
+            // Bookmarklet
+            openBookmarkletModal() {
+                els.bookmarkletModal?.classList.remove('hidden');
+            },
+
+            closeBookmarkletModal() {
+                els.bookmarkletModal?.classList.add('hidden');
+            },
+
+            generateBookmarklet() {
+                if (els.bookmarkletLink) {
+                    els.bookmarkletLink.href = 'javascript:(function(){window.open("' + CONFIG.API_BASE + '/save?url="+encodeURIComponent(window.location.href))})();';
+                }
             }
         };
+
+        // =============================================================================
+        // Initialize
+        // =============================================================================
 
         app.init();
     </script>
