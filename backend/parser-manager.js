@@ -16,11 +16,22 @@ process.stdin.on('data', chunk => {
 });
 
 process.stdin.on('end', async () => {
-    const parsers = ['readability', 'defuddle', 'postlight'];
+    // Get parsers from command line args or use defaults
+    const args = process.argv.slice(2);
+    const availableParsers = ['readability', 'defuddle', 'postlight'];
+    
+    // Filter requested parsers to ensure they exist, or use all if none specified
+    let parsersToRun = args.length > 0 
+        ? args.filter(p => availableParsers.includes(p))
+        : availableParsers;
+        
+    // If args provided but no valid parsers found, fallback to all (or could error out)
+    if (parsersToRun.length === 0) parsersToRun = availableParsers;
+
     const results = {};
 
     // Run all parsers in parallel
-    const promises = parsers.map(parserName => {
+    const promises = parsersToRun.map(parserName => {
         return new Promise((resolve) => {
             // Use .mjs for defuddle (ES module), .js for others
             const extension = parserName === 'defuddle' ? '.mjs' : '.js';
