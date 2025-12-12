@@ -700,6 +700,77 @@ def list_articles():
         return jsonify({"error": "Failed to list articles"}), 500
 
 
+@app.route('/articles/search', methods=['GET'])
+def search_articles():
+    """Search articles by query string across title, content, snippet, and author"""
+    try:
+        query = request.args.get('q', '').strip()
+
+        if not query:
+            return jsonify({"error": "Query parameter 'q' is required"}), 400
+
+        if len(query) > 500:
+            return jsonify({"error": "Query too long (max 500 characters)"}), 400
+
+        # Use LIKE for simple full-text search
+        # SQLite FTS5 would be better for production but requires schema changes
+        search_pattern = f"%{query}%"
+
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('''
+                SELECT id, title, author, source_domain, archive_url, original_url,
+                       snippet, text_length, read_time, captured_at, status, topics
+                FROM articles
+                WHERE title LIKE ?
+                   OR text_content LIKE ?
+                   OR snippet LIKE ?
+                   OR author LIKE ?
+                   OR source_domain LIKE ?
+                ORDER BY
+                    -- Prioritize title matches
+                    CASE WHEN title LIKE ? THEN 1 ELSE 2 END,
+                    captured_at DESC
+                LIMIT 100
+            ''', (search_pattern, search_pattern, search_pattern, search_pattern,
+                  search_pattern, search_pattern))
+            rows = c.fetchall()
+
+        articles = []
+        for row in rows:
+            try:
+                topics = json.loads(row['topics']) if row['topics'] else []
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid topics JSON for article {row['id']}")
+                topics = []
+
+            articles.append({
+                'id': row['id'],
+                'title': row['title'],
+                'author': row['author'],
+                'source': row['original_url'] or row['archive_url'],
+                'source_domain': row['source_domain'],
+                'archive_url': row['archive_url'],
+                'snippet': row['snippet'],
+                'text_length': row['text_length'],
+                'readTime': row['read_time'],
+                'captured_at': row['captured_at'],
+                'status': row['status'] or 'unread',
+                'topics': topics
+            })
+
+        logger.info(f"Search for '{query}' returned {len(articles)} results")
+        return jsonify({
+            "query": query,
+            "results": articles,
+            "count": len(articles)
+        })
+
+    except Exception as e:
+        logger.exception(f"Error searching articles")
+        return jsonify({"error": "Search failed"}), 500
+
+
 @app.route('/articles/<int:article_id>', methods=['GET'])
 def get_article(article_id):
     """Get full article content for reader view"""
@@ -915,6 +986,7 @@ if __name__ == '__main__':
     print("\nAPI Endpoints:")
     print("  POST   /save                      - Save article from bookmarklet")
     print("  GET    /articles                  - List all articles")
+    print("  GET    /articles/search?q=query   - Search articles by content")
     print("  GET    /articles/:id              - Get article content")
     print("  PATCH  /articles/:id              - Update article status/topics")
     print("  GET    /articles/:id/html         - View original HTML")

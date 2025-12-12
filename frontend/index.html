@@ -207,8 +207,12 @@
                         </div>
                     </div>
 
-                    <div class="font-mono text-xs text-dim">
-                        <!-- Placeholder for future search -->
+                    <!-- Search -->
+                    <div class="relative w-full md:w-80">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-dim text-xs"></i>
+                        <input type="text" id="search-input"
+                            class="w-full bg-cardbg border border-border rounded py-1.5 pl-8 pr-3 text-xs font-mono text-white focus:border-cyan focus:outline-none placeholder-dim"
+                            placeholder="SEARCH ARCHIVE...">
                     </div>
                 </div>
 
@@ -350,18 +354,21 @@
 
         const state = {
             articles: [],
+            searchResults: [],  // Results from server-side search
             currentArticleId: null,
             currentParserMode: 'readability',
             parserResults: null,
             filters: {
                 status: 'all',
-                topic: 'all'
+                topic: 'all',
+                search: ''
             },
             reprocessTriggered: new Set(),
             customGroups: [],
             draggingIds: [],
             selectionMode: false,
-            selectedIds: new Set()
+            selectedIds: new Set(),
+            searchMode: 'client'  // 'client' or 'server'
         };
 
         // =============================================================================
@@ -390,6 +397,9 @@
             selectBtn: document.getElementById('select-mode-btn'),
             selectionActions: document.getElementById('selection-actions'),
             selectedCount: document.getElementById('selected-count'),
+
+            // Search
+            searchInput: document.getElementById('search-input'),
 
             // Reader
             progressBar: document.getElementById('progress-bar'),
@@ -578,6 +588,34 @@
                     throw new Error('Failed to fetch HTML');
                 }
                 return await response.text();
+            },
+
+            async searchArticles(query) {
+                if (!query || !query.trim()) {
+                    throw new Error('Query is required');
+                }
+
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), CONFIG.TIMEOUTS.API_TIMEOUT);
+
+                try {
+                    const response = await fetch(
+                        `${CONFIG.API_BASE}/articles/search?q=${encodeURIComponent(query)}`,
+                        { signal: controller.signal }
+                    );
+
+                    clearTimeout(timeout);
+
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.error || 'Search failed');
+                    }
+
+                    return await response.json();
+                } catch (error) {
+                    clearTimeout(timeout);
+                    throw error;
+                }
             }
         };
 
@@ -685,6 +723,17 @@
 
                 // Selection
                 document.getElementById('select-mode-btn')?.addEventListener('click', () => app.toggleSelectionMode());
+
+                // Search
+                if (els.searchInput) {
+                    const debouncedSearch = utils.debounce((value) => {
+                        app.handleSearch(value);
+                    }, 300);  // Wait 300ms after user stops typing
+
+                    els.searchInput.addEventListener('input', (e) => {
+                        debouncedSearch(e.target.value);
+                    });
+                }
 
                 // Reader
                 document.getElementById('reader-back-btn')?.addEventListener('click', () => app.goHome());
@@ -822,17 +871,86 @@
             },
 
             getFilteredArticles() {
+                // If in server search mode, use search results directly
+                // (server already filtered by search term)
+                if (state.searchMode === 'server' && state.filters.search) {
+                    return state.searchResults.filter(a => {
+                        // Still apply status and topic filters
+                        if (state.filters.status === 'read' && a.status !== 'read') return false;
+                        if (state.filters.status === 'unread' && a.status === 'read') return false;
+
+                        if (state.filters.topic !== 'all') {
+                            const topics = a.topics || [];
+                            if (!topics.includes(state.filters.topic)) return false;
+                        }
+
+                        return true;
+                    });
+                }
+
+                // Client-side filtering on all articles
                 return state.articles.filter(a => {
+                    // Status filter
                     if (state.filters.status === 'read' && a.status !== 'read') return false;
                     if (state.filters.status === 'unread' && a.status === 'read') return false;
 
+                    // Topic filter
                     if (state.filters.topic !== 'all') {
                         const topics = a.topics || [];
                         if (!topics.includes(state.filters.topic)) return false;
                     }
 
+                    // Search filter (client-side fallback - only searches title/snippet/author)
+                    if (state.filters.search && state.filters.search.trim()) {
+                        const term = state.filters.search.toLowerCase();
+                        const title = (a.title || '').toLowerCase();
+                        const snippet = (a.snippet || '').toLowerCase();
+                        const author = (a.author || '').toLowerCase();
+                        const source = (a.source_domain || '').toLowerCase();
+
+                        if (!title.includes(term) &&
+                            !snippet.includes(term) &&
+                            !author.includes(term) &&
+                            !source.includes(term)) {
+                            return false;
+                        }
+                    }
+
                     return true;
                 });
+            },
+
+            // Search
+            async handleSearch(query) {
+                query = query ? query.trim() : '';
+                state.filters.search = query;
+
+                // If no query, show all articles with current filters
+                if (!query) {
+                    state.searchMode = 'client';
+                    app.renderLibrary();
+                    return;
+                }
+
+                // For search queries, use server-side search to access full article content
+                // The server can search through text_content which isn't in the article list
+                try {
+                    state.searchMode = 'server';
+                    ui.showLoading(els.articleList, 'SEARCHING...');
+
+                    const response = await api.searchArticles(query);
+
+                    // Temporarily replace articles with search results
+                    state.searchResults = response.results;
+                    app.renderLibrary();
+
+                    console.log(`Search for "${query}" found ${response.count} results`);
+                } catch (error) {
+                    console.error('Search failed:', error);
+                    // Fall back to client-side search on cached data
+                    state.searchMode = 'client';
+                    app.renderLibrary();
+                }
             },
 
             // Groups
@@ -1261,11 +1379,87 @@
                 if (els.redriveIcon) els.redriveIcon.classList.add('fa-spin');
 
                 try {
+                    // Trigger reprocessing
                     await api.reprocessParser(id, mode);
 
-                    setTimeout(() => {
-                        if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
-                    }, CONFIG.TIMEOUTS.REDRIVE_ANIMATION);
+                    // Poll for updated results (check every 2 seconds for up to 30 seconds)
+                    const maxAttempts = 15;  // 30 seconds total
+                    let attempts = 0;
+
+                    const pollForResults = async () => {
+                        attempts++;
+
+                        try {
+                            // Fetch the updated article
+                            const article = await api.getArticle(id);
+                            state.parserResults = article.parser_results || {};
+
+                            // Also update the article in the cached list
+                            const cachedArticle = state.articles.find(a => a.id === id);
+                            if (cachedArticle) {
+                                // Update relevant fields from the refreshed article
+                                Object.assign(cachedArticle, {
+                                    title: article.title,
+                                    author: article.author,
+                                    snippet: article.snippet,
+                                    text_length: article.text_length,
+                                    readTime: article.readTime
+                                });
+                            }
+
+                            // Check if the current parser has new results
+                            const parserResult = state.parserResults[mode];
+
+                            // If we have a result (success or failure), stop polling
+                            if (parserResult) {
+                                // Update the content display
+                                await app.setParser(mode);
+
+                                if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+
+                                if (parserResult.success) {
+                                    console.log(`Parser ${mode} results updated successfully`);
+                                } else {
+                                    console.warn(`Parser ${mode} failed:`, parserResult.error || 'Unknown error');
+                                    // Show error message to user
+                                    if (els.rContent) {
+                                        const errorMsg = parserResult.error || 'Parser failed';
+                                        els.rContent.innerHTML = `
+                                            <div class="bg-red-900/20 border border-red-500/30 rounded-lg p-6 text-center">
+                                                <i class="fa-solid fa-triangle-exclamation text-red-400 text-2xl mb-3"></i>
+                                                <h3 class="text-red-400 font-mono text-sm mb-2">PARSER FAILED</h3>
+                                                <p class="text-dim text-xs">${utils.escapeHtml(errorMsg)}</p>
+                                            </div>
+                                        `;
+                                    }
+                                }
+                                return true;
+                            }
+
+                            // Continue polling if we haven't exceeded max attempts
+                            if (attempts < maxAttempts) {
+                                setTimeout(() => pollForResults(), 2000);
+                                return false;
+                            } else {
+                                // Timeout - stop spinning but don't show error (might still be processing)
+                                if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                                console.log(`Polling timeout - parser may still be processing`);
+                                return false;
+                            }
+                        } catch (error) {
+                            console.error('Error polling for results:', error);
+                            if (attempts < maxAttempts) {
+                                setTimeout(() => pollForResults(), 2000);
+                            } else {
+                                if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                            }
+                            return false;
+                        }
+                    };
+
+                    // Start polling after a short delay
+                    setTimeout(() => pollForResults(), 2000);
+
                 } catch (error) {
                     console.error('Redrive failed:', error);
                     if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');

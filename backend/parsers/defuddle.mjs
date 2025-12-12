@@ -17,6 +17,10 @@ process.stdin.on('data', chunk => {
 
 process.stdin.on('end', async () => {
     try {
+        // Suppress console.log from defuddle library to prevent polluting JSON output
+        const originalLog = console.log;
+        console.log = () => {};
+
         // Create JSDOM instance from HTML
         const dom = new JSDOM(html, {
             url: "https://archive.is/example"
@@ -24,6 +28,9 @@ process.stdin.on('end', async () => {
 
         // Extract article with Defuddle (pass JSDOM object)
         const result = await Defuddle(dom);
+
+        // Restore console.log
+        console.log = originalLog;
 
         if (result) {
             // Output extracted content as JSON
