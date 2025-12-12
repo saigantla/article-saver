@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 from contextlib import contextmanager
 from typing import Optional, Dict, Any, Tuple
 import llm_parser
+import tts_generator
 
 # =============================================================================
 # Configuration
@@ -106,9 +107,23 @@ def init_db():
                 llm_content TEXT,
                 llm_status TEXT DEFAULT 'pending',
                 status TEXT DEFAULT 'unread',
-                topics TEXT DEFAULT '[]'
+                topics TEXT DEFAULT '[]',
+                audio_file_path TEXT,
+                audio_duration REAL,
+                audio_generated_at TIMESTAMP
             )
         ''')
+
+        # Migration: Add audio fields to existing tables
+        try:
+            c.execute("SELECT audio_file_path FROM articles LIMIT 1")
+        except:
+            logger.info("Adding audio fields to articles table...")
+            c.execute("ALTER TABLE articles ADD COLUMN audio_file_path TEXT")
+            c.execute("ALTER TABLE articles ADD COLUMN audio_duration REAL")
+            c.execute("ALTER TABLE articles ADD COLUMN audio_generated_at TIMESTAMP")
+            logger.info("Audio fields added successfully")
+
         logger.info("Database initialized")
 
 
@@ -814,7 +829,12 @@ def get_article(article_id):
             'llm_content': row['llm_content'],
             'llm_status': row['llm_status'],
             'status': row['status'] or 'unread',
-            'topics': topics
+            'topics': topics,
+            'audio': {
+                'available': bool(row['audio_file_path']),
+                'duration': row['audio_duration'],
+                'generated_at': row['audio_generated_at']
+            } if row['audio_file_path'] else None
         })
 
     except Exception as e:
@@ -1093,6 +1113,128 @@ def reprocess_article_stream(article_id):
 
     except Exception as e:
         logger.error(f"Failed to start streaming for article {article_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/articles/<int:article_id>/generate-audio', methods=['POST'])
+def generate_audio(article_id):
+    """Generate TTS audio for an article"""
+    try:
+        # Get article and readability parser result
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('SELECT parser_results FROM articles WHERE id = ?', (article_id,))
+            row = c.fetchone()
+
+        if not row:
+            logger.warning(f"Article {article_id} not found for audio generation")
+            return jsonify({"error": "Article not found"}), 404
+
+        parser_results = None
+        if row['parser_results']:
+            try:
+                parser_results = json.loads(row['parser_results'])
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid parser_results for article {article_id}")
+
+        # Get readability parser content
+        if not parser_results or 'readability' not in parser_results:
+            return jsonify({"error": "No readability parser results available"}), 400
+
+        readability_result = parser_results['readability']
+        if not readability_result.get('success'):
+            return jsonify({"error": "Readability parser failed for this article"}), 400
+
+        html_content = readability_result.get('htmlContent')
+        if not html_content:
+            return jsonify({"error": "No HTML content in readability results"}), 400
+
+        logger.info(f"Generating audio for article {article_id}...")
+
+        # Generate audio (this may take 1-5 seconds)
+        result = tts_generator.generate_audio_for_article(article_id, html_content)
+
+        if result['success']:
+            # Save metadata to database
+            with get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute('''
+                    UPDATE articles
+                    SET audio_file_path = ?,
+                        audio_duration = ?,
+                        audio_generated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ''', (result['relative_path'], result['duration'], article_id))
+
+            logger.info(f"Audio generated for article {article_id}: "
+                       f"{result['duration']:.1f}s, {result['size']:,} bytes")
+
+            return jsonify({
+                'success': True,
+                'duration': result['duration'],
+                'size': result['size'],
+                'text_length': result['text_length']
+            })
+        else:
+            logger.error(f"Audio generation failed for article {article_id}: {result.get('error')}")
+            return jsonify({
+                'success': False,
+                'error': result.get('error', 'Unknown error')
+            }), 500
+
+    except Exception as e:
+        logger.exception(f"Error generating audio for article {article_id}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/audio/<int:article_id>.wav', methods=['GET'])
+def serve_audio(article_id):
+    """Serve audio file for an article"""
+    try:
+        audio_path = tts_generator.get_audio_path(article_id)
+
+        if not audio_path.exists():
+            logger.warning(f"Audio file not found for article {article_id}")
+            return jsonify({"error": "Audio not found"}), 404
+
+        return send_file(
+            audio_path,
+            mimetype='audio/wav',
+            as_attachment=False,
+            download_name=f"article_{article_id}.wav"
+        )
+
+    except Exception as e:
+        logger.exception(f"Error serving audio for article {article_id}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/articles/<int:article_id>/audio', methods=['DELETE'])
+def delete_audio(article_id):
+    """Delete audio file for an article"""
+    try:
+        # Delete file
+        deleted = tts_generator.delete_audio(article_id)
+
+        if deleted:
+            # Clear database fields
+            with get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute('''
+                    UPDATE articles
+                    SET audio_file_path = NULL,
+                        audio_duration = NULL,
+                        audio_generated_at = NULL
+                    WHERE id = ?
+                ''', (article_id,))
+
+            logger.info(f"Audio deleted for article {article_id}")
+            return jsonify({'success': True})
+        else:
+            return jsonify({"error": "Audio not found"}), 404
+
+    except Exception as e:
+        logger.exception(f"Error deleting audio for article {article_id}")
         return jsonify({"error": str(e)}), 500
 
 

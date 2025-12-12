@@ -238,8 +238,14 @@
 
                     <!-- Parser Controls -->
                     <div class="flex items-center space-x-4">
-                        <button id="redrive-btn" title="Redrive Parsing" class="text-dim hover:text-cyan transition-colors">
+                        <button id="redrive-btn" title="Redrive Parsing" class="flex items-center space-x-2 font-mono text-xs text-dim hover:text-cyan border border-border hover:border-cyan rounded px-3 py-1 transition-all">
                             <i id="redrive-icon" class="fa-solid fa-rotate-right text-xs"></i>
+                            <span class="hidden sm:inline">REDRIVE</span>
+                        </button>
+
+                        <button id="btn-generate-audio" class="flex items-center space-x-2 font-mono text-xs text-dim hover:text-cyan border border-border hover:border-cyan rounded px-3 py-1 transition-all">
+                            <i class="fa-solid fa-headphones"></i>
+                            <span>LISTEN</span>
                         </button>
 
                         <div class="relative group">
@@ -299,6 +305,37 @@
                 </div>
             </section>
         </main>
+    </div>
+
+    <!-- Fixed Bottom Audio Player Bar -->
+    <div id="audio-player-bar" class="fixed bottom-0 left-0 w-full bg-obsidian/90 backdrop-blur border-t border-border z-50 hidden transform transition-transform duration-300 translate-y-full flex flex-col">
+        <!-- Clickable Progress Bar -->
+        <div id="audio-progress-bar" class="w-full h-2 bg-gray-800 cursor-pointer relative group">
+            <div id="audio-progress" class="h-full bg-cyan w-0 relative transition-all duration-75 ease-linear">
+                <div class="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100"></div>
+            </div>
+        </div>
+
+        <div class="max-w-3xl mx-auto w-full flex items-center justify-between p-4">
+            <div class="flex items-center space-x-4">
+                <button id="audio-play-btn" class="w-10 h-10 rounded-full bg-cyan text-black flex items-center justify-center hover:bg-cyan/80 transition-all">
+                    <i id="audio-play-icon" class="fa-solid fa-play"></i>
+                </button>
+                <div class="text-xs font-mono flex flex-col">
+                    <span id="audio-status-text" class="text-white">PLAYING AUDIO</span>
+                    <span class="text-dim text-[10px]">TAP TEXT TO SCRUB</span>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-4">
+                <button id="audio-speed-btn" class="font-mono text-xs text-white hover:text-cyan transition-all px-2 py-1">
+                    <span id="audio-speed-display">1.0x</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Hidden audio element -->
+        <audio id="main-audio" class="hidden"></audio>
     </div>
 
     <!-- MODAL: BOOKMARKLET -->
@@ -368,7 +405,10 @@
             draggingIds: [],
             selectionMode: false,
             selectedIds: new Set(),
-            searchMode: 'client'  // 'client' or 'server'
+            searchMode: 'client',  // 'client' or 'server'
+            // Audio state
+            audioUrl: null,
+            isGeneratingAudio: false
         };
 
         // =============================================================================
@@ -413,6 +453,18 @@
             rContent: document.getElementById('reader-content'),
             rTags: document.getElementById('reader-tags'),
             rMarkRead: document.getElementById('reader-mark-read'),
+
+            // Audio Player
+            audioBar: document.getElementById('audio-player-bar'),
+            audio: document.getElementById('main-audio'),
+            audioProgress: document.getElementById('audio-progress'),
+            audioProgressBar: document.getElementById('audio-progress-bar'),
+            audioPlayBtn: document.getElementById('audio-play-btn'),
+            audioPlayIcon: document.getElementById('audio-play-icon'),
+            audioStatusText: document.getElementById('audio-status-text'),
+            audioSpeedBtn: document.getElementById('audio-speed-btn'),
+            audioSpeedDisplay: document.getElementById('audio-speed-display'),
+            btnGenerateAudio: document.getElementById('btn-generate-audio'),
 
             // Modal
             bookmarkletModal: document.getElementById('modal-bookmarklet'),
@@ -742,6 +794,14 @@
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                 });
                 document.getElementById('reader-delete-btn')?.addEventListener('click', () => app.deleteCurrent());
+
+                // Audio controls
+                els.btnGenerateAudio?.addEventListener('click', () => app.generateAudio());
+                els.audioPlayBtn?.addEventListener('click', () => app.toggleAudioPlay());
+                els.audioSpeedBtn?.addEventListener('click', () => app.changePlaybackRate());
+                els.audioProgressBar?.addEventListener('click', (e) => app.seekAudio(e));
+                els.audio?.addEventListener('timeupdate', () => app.updateAudioProgress());
+                els.audio?.addEventListener('ended', () => app.onAudioEnded());
 
                 // Parser dropdown
                 document.querySelectorAll('[data-parser]').forEach(btn => {
@@ -1275,6 +1335,9 @@
                         els.rMarkRead.onclick = () => app.toggleReadStatus(id, !isRead);
                     }
 
+                    // Setup audio player
+                    app.setupAudio(article);
+
                     // Set parser mode
                     app.setParser('readability');
 
@@ -1296,6 +1359,15 @@
                 els.sidebar?.classList.remove('hidden');
                 state.currentArticleId = null;
                 if (els.progressBar) els.progressBar.style.width = '0%';
+
+                // Hide audio bar when leaving reader
+                if (els.audioBar) {
+                    els.audioBar.classList.add('hidden', 'translate-y-full');
+                    els.audioBar.classList.remove('translate-y-0');
+                }
+                if (els.audio) {
+                    els.audio.pause();
+                }
             },
 
             async toggleReadStatus(id, markAsRead) {
@@ -1671,6 +1743,95 @@
                 setTimeout(() => pollForResults(), 2000);
             },
 
+            setupAudio(article) {
+                const hasAudio = article.audio && article.audio.available;
+
+                if (hasAudio) {
+                    // Show player, hide generate button
+                    if (els.audioPlayerSection) els.audioPlayerSection.classList.remove('hidden');
+                    if (els.audioGenerateSection) els.audioGenerateSection.classList.add('hidden');
+
+                    // Set audio source
+                    if (els.audioSource && els.audioPlayer) {
+                        els.audioSource.src = `/audio/${article.id}.wav`;
+                        els.audioPlayer.load();
+                    }
+
+                    // Set duration
+                    if (els.audioDuration && article.audio.duration) {
+                        const minutes = Math.floor(article.audio.duration / 60);
+                        const seconds = Math.floor(article.audio.duration % 60);
+                        els.audioDuration.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                    }
+
+                    // Reset playback speed
+                    if (els.audioPlayer) {
+                        els.audioPlayer.playbackRate = 1.0;
+                    }
+                    if (els.audioSpeedBtn) {
+                        els.audioSpeedBtn.textContent = '1.0x';
+                    }
+                } else {
+                    // Show generate button, hide player
+                    if (els.audioPlayerSection) els.audioPlayerSection.classList.add('hidden');
+                    if (els.audioGenerateSection) els.audioGenerateSection.classList.remove('hidden');
+                }
+            },
+
+            async generateAudio() {
+                const id = state.currentArticleId;
+                if (!id) return;
+
+                const btn = els.generateAudioBtn;
+                if (!btn) return;
+
+                // Disable button and show loading state
+                const originalHTML = btn.innerHTML;
+                btn.disabled = true;
+                btn.innerHTML = `
+                    <i class="fa-solid fa-spinner fa-spin text-cyan-400"></i>
+                    <span class="font-mono text-xs text-cyan-400">GENERATING AUDIO...</span>
+                `;
+
+                try {
+                    const response = await fetch(`/articles/${id}/generate-audio`, {
+                        method: 'POST'
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        // Reload article to get updated audio metadata
+                        const article = await api.getArticle(id);
+                        app.setupAudio(article);
+
+                        ui.showSuccess(`Audio generated: ${Math.floor(result.duration)}s`);
+                    } else {
+                        ui.showError(`Failed to generate audio: ${result.error}`);
+                        btn.disabled = false;
+                        btn.innerHTML = originalHTML;
+                    }
+                } catch (error) {
+                    console.error('Error generating audio:', error);
+                    ui.showError('Failed to generate audio');
+                    btn.disabled = false;
+                    btn.innerHTML = originalHTML;
+                }
+            },
+
+            cycleAudioSpeed() {
+                if (!els.audioPlayer || !els.audioSpeedBtn) return;
+
+                const speeds = [1.0, 1.5, 2.0];
+                const currentSpeed = els.audioPlayer.playbackRate;
+                const currentIndex = speeds.indexOf(currentSpeed);
+                const nextIndex = (currentIndex + 1) % speeds.length;
+                const nextSpeed = speeds[nextIndex];
+
+                els.audioPlayer.playbackRate = nextSpeed;
+                els.audioSpeedBtn.textContent = `${nextSpeed}x`;
+            },
+
             async deleteArticle(id) {
                 if (!confirm("Delete article?")) return;
 
@@ -1694,6 +1855,227 @@
                 if (state.currentArticleId) {
                     await app.deleteArticle(state.currentArticleId);
                     app.goHome();
+                }
+            },
+
+            // Audio Player
+            setupAudio(article) {
+                // Hide audio bar and reset state
+                if (els.audioBar) {
+                    els.audioBar.classList.add('hidden', 'translate-y-full');
+                    els.audioBar.classList.remove('translate-y-0');
+                }
+                if (els.audio) {
+                    els.audio.pause();
+                    els.audio.src = '';
+                }
+                state.audioUrl = null;
+                state.isGeneratingAudio = false;
+
+                // Check if audio is available
+                if (article.audio && article.audio.available) {
+                    // Audio already generated - set up player
+                    const audioUrl = `/audio/${article.id}.wav`;
+                    state.audioUrl = audioUrl;
+                    if (els.audio) {
+                        els.audio.src = audioUrl;
+                    }
+                    if (els.btnGenerateAudio) {
+                        els.btnGenerateAudio.innerHTML = '<i class="fa-solid fa-headphones"></i><span>LISTEN</span>';
+                    }
+                } else {
+                    // No audio yet - show generate button
+                    if (els.btnGenerateAudio) {
+                        els.btnGenerateAudio.innerHTML = '<i class="fa-solid fa-headphones"></i><span>LISTEN</span>';
+                    }
+                }
+
+                // Setup text-click scrubbing
+                if (els.rContent) {
+                    els.rContent.onclick = (e) => app.scrubAudioByText(e);
+                }
+            },
+
+            async generateAudio() {
+                const id = state.currentArticleId;
+                if (!id || state.isGeneratingAudio) return;
+
+                // If audio already exists, just play it
+                if (state.audioUrl && els.audio && els.audio.src) {
+                    // Show audio bar and play
+                    if (els.audioBar) {
+                        els.audioBar.classList.remove('hidden', 'translate-y-full');
+                        els.audioBar.classList.add('translate-y-0');
+                    }
+                    app.toggleAudioPlay();
+                    return;
+                }
+
+                // Generate new audio
+                state.isGeneratingAudio = true;
+                if (els.btnGenerateAudio) {
+                    els.btnGenerateAudio.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i><span>GENERATING...</span>';
+                    els.btnGenerateAudio.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+
+                try {
+                    const response = await fetch(`/articles/${id}/generate-audio`, {
+                        method: 'POST'
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Audio generation failed');
+                    }
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        // Set up audio player
+                        const audioUrl = `/audio/${id}.wav`;
+                        state.audioUrl = audioUrl;
+                        if (els.audio) {
+                            els.audio.src = audioUrl;
+                        }
+
+                        // Show audio bar
+                        if (els.audioBar) {
+                            els.audioBar.classList.remove('hidden', 'translate-y-full');
+                            els.audioBar.classList.add('translate-y-0');
+                        }
+
+                        // Auto-play
+                        app.toggleAudioPlay();
+
+                        if (els.btnGenerateAudio) {
+                            els.btnGenerateAudio.innerHTML = '<i class="fa-solid fa-headphones"></i><span>LISTEN</span>';
+                        }
+                    } else {
+                        throw new Error(result.error || 'Audio generation failed');
+                    }
+                } catch (error) {
+                    console.error('Audio generation error:', error);
+                    ui.showError('Failed to generate audio: ' + error.message);
+                    if (els.btnGenerateAudio) {
+                        els.btnGenerateAudio.innerHTML = '<i class="fa-solid fa-headphones"></i><span>LISTEN</span>';
+                    }
+                } finally {
+                    state.isGeneratingAudio = false;
+                    if (els.btnGenerateAudio) {
+                        els.btnGenerateAudio.classList.remove('opacity-50', 'cursor-not-allowed');
+                    }
+                }
+            },
+
+            toggleAudioPlay() {
+                if (!els.audio) return;
+
+                if (els.audio.paused) {
+                    els.audio.play();
+                    if (els.audioPlayIcon) {
+                        els.audioPlayIcon.classList.remove('fa-play');
+                        els.audioPlayIcon.classList.add('fa-pause');
+                    }
+                    if (els.audioStatusText) {
+                        els.audioStatusText.textContent = 'PLAYING AUDIO';
+                    }
+                } else {
+                    els.audio.pause();
+                    if (els.audioPlayIcon) {
+                        els.audioPlayIcon.classList.remove('fa-pause');
+                        els.audioPlayIcon.classList.add('fa-play');
+                    }
+                    if (els.audioStatusText) {
+                        els.audioStatusText.textContent = 'AUDIO PAUSED';
+                    }
+                }
+            },
+
+            changePlaybackRate() {
+                if (!els.audio) return;
+
+                const rates = [1.0, 1.5, 2.0];
+                const currentRate = els.audio.playbackRate;
+                const currentIndex = rates.indexOf(currentRate);
+                const nextIndex = (currentIndex + 1) % rates.length;
+                const nextRate = rates[nextIndex];
+
+                els.audio.playbackRate = nextRate;
+                if (els.audioSpeedDisplay) {
+                    els.audioSpeedDisplay.textContent = nextRate.toFixed(1) + 'x';
+                }
+            },
+
+            seekAudio(e) {
+                if (!els.audio || !els.audio.duration) return;
+
+                const bar = e.currentTarget;
+                const rect = bar.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const width = rect.width;
+                const percent = Math.min(Math.max(0, clickX / width), 1);
+
+                els.audio.currentTime = els.audio.duration * percent;
+
+                // Resume playback if paused
+                if (els.audio.paused) {
+                    app.toggleAudioPlay();
+                }
+            },
+
+            updateAudioProgress() {
+                if (!els.audio || !els.audio.duration || !els.audioProgress) return;
+
+                const percent = (els.audio.currentTime / els.audio.duration) * 100;
+                els.audioProgress.style.width = `${percent}%`;
+            },
+
+            onAudioEnded() {
+                if (els.audioPlayIcon) {
+                    els.audioPlayIcon.classList.remove('fa-pause');
+                    els.audioPlayIcon.classList.add('fa-play');
+                }
+                if (els.audioStatusText) {
+                    els.audioStatusText.textContent = 'AUDIO FINISHED';
+                }
+                if (els.audioProgress) {
+                    els.audioProgress.style.width = '100%';
+                }
+            },
+
+            scrubAudioByText(e) {
+                // Only scrub if audio bar is visible
+                if (!state.audioUrl || !els.audioBar || els.audioBar.classList.contains('hidden')) {
+                    return;
+                }
+                if (!els.audio || !els.audio.duration || !isFinite(els.audio.duration)) {
+                    return;
+                }
+
+                // Get click position relative to article content
+                const rect = els.rContent.getBoundingClientRect();
+                const totalHeight = els.rContent.offsetHeight;
+                const clickY = e.pageY - (rect.top + window.scrollY);
+
+                // Calculate percentage through article
+                const percentage = Math.min(Math.max(clickY / totalHeight, 0), 1);
+
+                // Seek to that percentage in audio
+                els.audio.currentTime = els.audio.duration * percentage;
+
+                // Resume playback if paused
+                if (els.audio.paused) {
+                    app.toggleAudioPlay();
+                }
+
+                // Visual feedback
+                if (els.audioStatusText) {
+                    const pctDisplay = Math.round(percentage * 100);
+                    els.audioStatusText.textContent = `SEEKING TO ${pctDisplay}%`;
+                    setTimeout(() => {
+                        if (els.audioStatusText) {
+                            els.audioStatusText.textContent = 'PLAYING AUDIO';
+                        }
+                    }, 800);
                 }
             },
 
