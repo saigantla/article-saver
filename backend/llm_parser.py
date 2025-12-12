@@ -619,16 +619,14 @@ def process_article_streaming_generator(html: str):
                         'total_chunks': len(chunks)
                     })
 
-                    # Process chunk with streaming
-                    def chunk_content_callback(text):
-                        # Can't yield from nested function, but chunks are fast enough
-                        pass
+                    # Stream each chunk in real-time
+                    chunk_content = ''
+                    for chunk_text in process_chunk_streaming_generator(chunk, i, len(chunks)):
+                        chunk_content += chunk_text
+                        # Yield each character/token as it arrives
+                        yield ('chunk', {'text': chunk_text, 'chunk_num': i})
 
-                    processed = process_chunk_streaming(chunk, i, len(chunks), chunk_content_callback)
-                    processed_chunks.append(processed)
-
-                    # Yield chunk as it's completed
-                    yield ('chunk', {'text': processed, 'chunk_num': i})
+                    processed_chunks.append(chunk_content)
 
                 except Exception as e:
                     yield ('error', {'message': f'Chunk {i} failed: {str(e)}'})
@@ -657,18 +655,14 @@ def process_article_streaming_generator(html: str):
 
         yield ('status', {'message': 'Cleaning HTML with LLM...', 'stage': 'llm'})
 
-        # Stream LLM processing - accumulate and yield chunks
+        # Stream LLM processing - yield chunks as they arrive from API
         accumulated_content = ''
 
-        def llm_chunk_callback(text):
-            nonlocal accumulated_content
-            accumulated_content += text
+        for chunk_text in call_chutes_api_streaming_generator(extracted_html):
+            accumulated_content += chunk_text
+            yield ('chunk', {'text': chunk_text})
 
-        cleaned_html = call_chutes_api_streaming(extracted_html, llm_chunk_callback)
-
-        # Since the callback accumulates, yield the full content at intervals
-        # For real streaming within a single request, we'd need to restructure call_chutes_api_streaming
-        yield ('chunk', {'text': cleaned_html})
+        cleaned_html = accumulated_content
 
         yield ('done', {
             'content': cleaned_html,
@@ -810,8 +804,13 @@ def process_article_streaming(html: str, progress_callback):
         return {'success': False, 'error': f'Unexpected error: {e}'}
 
 
-def process_chunk_streaming(chunk: str, chunk_num: int, total_chunks: int, chunk_callback):
-    """Streaming version of process_chunk"""
+def process_chunk_streaming_generator(chunk: str, chunk_num: int, total_chunks: int):
+    """
+    Generator version that yields chunks in real-time for chunked articles
+
+    Yields:
+        str: Each text chunk as it arrives from the streaming API
+    """
     prompt = f"""Extract and clean article content from this HTML fragment.
 
 CONTEXT: This is PART {chunk_num} of {total_chunks} of a larger article.
@@ -856,18 +855,49 @@ HTML Fragment:
             )
 
             if response.status_code == 200:
-                content = handle_streaming_response(response, chunk_callback)
+                # Stream chunks in real-time
+                in_code_block = False
+                accumulated = ""
 
-                if content:
-                    # Remove markdown code blocks
-                    if content.startswith('```html'):
-                        content = content.split('```html\n', 1)[1].rsplit('```', 1)[0]
-                    elif content.startswith('```'):
-                        content = content.split('```\n', 1)[1].rsplit('```', 1)[0]
+                for line in response.iter_lines():
+                    if not line:
+                        continue
 
-                    return content
-                else:
-                    raise APIError(f"No content in streaming response for chunk {chunk_num}")
+                    line = line.decode('utf-8')
+
+                    if line.startswith('data: '):
+                        data_str = line[6:]
+
+                        if data_str == '[DONE]':
+                            break
+
+                        try:
+                            data = json.loads(data_str)
+                            if 'choices' in data and len(data['choices']) > 0:
+                                delta = data['choices'][0].get('delta', {})
+                                text_chunk = delta.get('content', '')
+                                if text_chunk:
+                                    accumulated += text_chunk
+
+                                    # Handle markdown code block removal on the fly
+                                    if not in_code_block and accumulated.endswith('```html\n'):
+                                        accumulated = accumulated[:-8]
+                                        in_code_block = True
+                                        continue
+                                    elif not in_code_block and accumulated.endswith('```\n'):
+                                        accumulated = accumulated[:-4]
+                                        in_code_block = True
+                                        continue
+
+                                    # Yield the chunk in real-time
+                                    if not (text_chunk.startswith('```') or text_chunk == '\n' and len(accumulated) < 10):
+                                        yield text_chunk
+
+                        except json.JSONDecodeError:
+                            continue
+
+                return  # Successfully completed
+
             elif response.status_code == 429:
                 if attempt < 1:
                     time.sleep(60)
@@ -890,8 +920,23 @@ HTML Fragment:
     raise APIError(f"Chunk {chunk_num} failed after all retries")
 
 
-def call_chutes_api_streaming(content: str, chunk_callback):
-    """Streaming version of call_chutes_api"""
+def process_chunk_streaming(chunk: str, chunk_num: int, total_chunks: int, chunk_callback):
+    """Streaming version of process_chunk (callback-based for backward compatibility)"""
+    accumulated = ''
+    for text_chunk in process_chunk_streaming_generator(chunk, chunk_num, total_chunks):
+        accumulated += text_chunk
+        if chunk_callback:
+            chunk_callback(text_chunk)
+    return accumulated
+
+
+def call_chutes_api_streaming_generator(content: str):
+    """
+    Generator version that yields chunks in real-time as they arrive from Chutes API
+
+    Yields:
+        str: Each text chunk as it arrives from the streaming API
+    """
     if not CHUTES_API_KEY:
         raise APIError("CHUTES_API_KEY environment variable not set")
 
@@ -928,18 +973,57 @@ HTML:
             )
 
             if response.status_code == 200:
-                content = handle_streaming_response(response, chunk_callback)
+                # Stream chunks in real-time as they arrive
+                in_code_block = False
+                accumulated = ""
 
-                if content:
-                    # Remove markdown code blocks if present
-                    if content.startswith('```html'):
-                        content = content.split('```html\n', 1)[1].rsplit('```', 1)[0]
-                    elif content.startswith('```'):
-                        content = content.split('```\n', 1)[1].rsplit('```', 1)[0]
+                for line in response.iter_lines():
+                    if not line:
+                        continue
 
-                    return content
-                else:
-                    raise APIError("No content in streaming API response")
+                    line = line.decode('utf-8')
+
+                    # SSE format: "data: {...}"
+                    if line.startswith('data: '):
+                        data_str = line[6:]
+
+                        if data_str == '[DONE]':
+                            break
+
+                        try:
+                            data = json.loads(data_str)
+                            if 'choices' in data and len(data['choices']) > 0:
+                                delta = data['choices'][0].get('delta', {})
+                                chunk = delta.get('content', '')
+                                if chunk:
+                                    accumulated += chunk
+
+                                    # Handle markdown code block removal on the fly
+                                    # If we see the start of ```html, mark it and skip
+                                    if not in_code_block and accumulated.endswith('```html\n'):
+                                        # Remove the ```html\n we just added
+                                        accumulated = accumulated[:-8]
+                                        in_code_block = True
+                                        continue
+                                    elif not in_code_block and accumulated.endswith('```\n'):
+                                        # Remove the ```\n we just added
+                                        accumulated = accumulated[:-4]
+                                        in_code_block = True
+                                        continue
+
+                                    # Yield the chunk (unless it's markdown syntax)
+                                    if not (chunk.startswith('```') or chunk == '\n' and len(accumulated) < 10):
+                                        yield chunk
+
+                        except json.JSONDecodeError:
+                            continue
+
+                # Clean up trailing markdown if present
+                if accumulated.endswith('```'):
+                    # Don't need to yield the closing ```, already accumulated
+                    pass
+
+                return  # Successfully completed
 
             elif response.status_code == 429:
                 if attempt < 2:
@@ -966,6 +1050,16 @@ HTML:
             raise APIError(f"Network error: {e}")
 
     raise APIError("API request failed after all retries")
+
+
+def call_chutes_api_streaming(content: str, chunk_callback):
+    """Streaming version of call_chutes_api (callback-based for backward compatibility)"""
+    accumulated = ''
+    for chunk in call_chutes_api_streaming_generator(content):
+        accumulated += chunk
+        if chunk_callback:
+            chunk_callback(chunk)
+    return accumulated
 
 
 # For testing

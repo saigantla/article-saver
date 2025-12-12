@@ -1390,21 +1390,26 @@
             },
 
             async redriveParsingStreaming(id, mode) {
-                // Show initial status
+                // Show initial streaming UI
                 if (els.rContent) {
                     els.rContent.innerHTML = `
-                        <div class="bg-cyan-900/20 border border-cyan-500/30 rounded-lg p-6 text-center">
-                            <i class="fa-solid fa-spinner fa-spin text-cyan-400 text-2xl mb-3"></i>
-                            <h3 class="text-cyan-400 font-mono text-sm mb-2">PROCESSING</h3>
-                            <p class="text-dim text-xs" id="streaming-status">Starting...</p>
+                        <div id="streaming-header" class="sticky top-0 bg-bg/95 backdrop-blur-sm border-b border-cyan-500/30 p-3 mb-4 rounded-lg flex items-center justify-between">
+                            <div class="flex items-center gap-3">
+                                <i class="fa-solid fa-circle-notch fa-spin text-cyan-400 text-sm"></i>
+                                <span class="text-cyan-400 font-mono text-xs" id="streaming-status">Starting...</span>
+                            </div>
+                            <div class="text-dim font-mono text-xs" id="streaming-progress">0 chars</div>
                         </div>
-                        <div id="streaming-content" class="mt-4 prose prose-invert max-w-none hidden"></div>
+                        <div id="streaming-content" class="prose prose-invert max-w-none"></div>
                     `;
                 }
 
                 const statusEl = document.getElementById('streaming-status');
+                const progressEl = document.getElementById('streaming-progress');
                 const contentEl = document.getElementById('streaming-content');
+                const headerEl = document.getElementById('streaming-header');
                 let accumulatedContent = '';
+                let charCount = 0;
 
                 return new Promise((resolve, reject) => {
                     const eventSource = new EventSource(`/articles/${id}/reprocess-stream`);
@@ -1421,19 +1426,30 @@
 
                     eventSource.addEventListener('chunk', (e) => {
                         const data = JSON.parse(e.data);
-                        console.log('Chunk received:', data.text.length, 'chars');
+                        const chunkText = data.text;
+
+                        console.log('Chunk received:', chunkText.length, 'chars');
 
                         // Accumulate content
-                        accumulatedContent += data.text;
+                        accumulatedContent += chunkText;
+                        charCount += chunkText.length;
 
-                        // Show content container if hidden
-                        if (contentEl && contentEl.classList.contains('hidden')) {
-                            contentEl.classList.remove('hidden');
+                        // Update progress counter
+                        if (progressEl) {
+                            progressEl.textContent = `${charCount.toLocaleString()} chars`;
                         }
 
-                        // Update displayed content with accumulated HTML
+                        // Render the HTML progressively (even if incomplete tags)
                         if (contentEl) {
                             contentEl.innerHTML = accumulatedContent;
+
+                            // Auto-scroll to show new content (smoothly)
+                            if (contentEl.lastElementChild) {
+                                contentEl.lastElementChild.scrollIntoView({
+                                    behavior: 'smooth',
+                                    block: 'end'
+                                });
+                            }
                         }
                     });
 
@@ -1443,14 +1459,38 @@
 
                         eventSource.close();
 
+                        // Remove streaming header with smooth transition
+                        if (headerEl) {
+                            headerEl.style.opacity = '0';
+                            headerEl.style.transition = 'opacity 0.3s ease-out';
+                            setTimeout(() => headerEl.remove(), 300);
+                        }
+
                         // Update parser results with the streamed result
                         if (data.result && data.result.success) {
                             state.parserResults = state.parserResults || {};
                             state.parserResults[mode] = data.result;
 
-                            // Display the content immediately (already have it from streaming!)
-                            if (els.rContent) {
-                                els.rContent.innerHTML = data.content || data.result.content;
+                            // Display final content (clean render)
+                            if (contentEl) {
+                                const finalContent = data.content || data.result.content;
+                                contentEl.innerHTML = finalContent;
+
+                                // Add a subtle success indicator
+                                const successBadge = document.createElement('div');
+                                successBadge.className = 'mt-4 p-2 bg-green-900/20 border border-green-500/30 rounded text-center';
+                                successBadge.innerHTML = `
+                                    <i class="fa-solid fa-check text-green-400 mr-2"></i>
+                                    <span class="text-green-400 font-mono text-xs">Completed - ${charCount.toLocaleString()} chars generated</span>
+                                `;
+                                contentEl.appendChild(successBadge);
+
+                                // Remove success badge after 3 seconds
+                                setTimeout(() => {
+                                    successBadge.style.opacity = '0';
+                                    successBadge.style.transition = 'opacity 0.5s ease-out';
+                                    setTimeout(() => successBadge.remove(), 500);
+                                }, 3000);
                             }
                         }
 
@@ -1510,11 +1550,36 @@
                     });
 
                     // Handle connection errors
-                    eventSource.onerror = (e) => {
+                    eventSource.onerror = async (e) => {
                         // Only handle if not already closed
                         if (eventSource.readyState !== EventSource.CLOSED) {
-                            console.error('EventSource connection error');
+                            console.error('EventSource connection error', e);
                             eventSource.close();
+
+                            // Try to fetch the error message from the endpoint
+                            try {
+                                const response = await fetch(`/articles/${id}/reprocess-stream`);
+                                if (!response.ok) {
+                                    const errorData = await response.json();
+                                    const errorMsg = errorData.error || 'Connection error';
+
+                                    if (els.rContent) {
+                                        els.rContent.innerHTML = `
+                                            <div class="bg-red-900/20 border border-red-500/30 rounded-lg p-6 text-center">
+                                                <i class="fa-solid fa-triangle-exclamation text-red-400 text-2xl mb-3"></i>
+                                                <h3 class="text-red-400 font-mono text-sm mb-2">STREAMING FAILED</h3>
+                                                <p class="text-dim text-xs">${utils.escapeHtml(errorMsg)}</p>
+                                            </div>
+                                        `;
+                                    }
+
+                                    if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                                    reject(new Error(errorMsg));
+                                    return;
+                                }
+                            } catch (fetchError) {
+                                console.error('Could not fetch error details:', fetchError);
+                            }
 
                             if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
                             reject(new Error('Connection lost'));

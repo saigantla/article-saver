@@ -1,7 +1,7 @@
 // Service Worker for Article Saver - Offline Support
 // Handles caching of app shell, CDN resources, and API responses
 
-const CACHE_VERSION = 'v16';  // Updated for streaming LLM parser
+const CACHE_VERSION = 'v18';  // Fixed real-time streaming for chunked articles
 const CACHE_NAMES = {
   app: `app-shell-${CACHE_VERSION}`,
   cdn: `cdn-assets-${CACHE_VERSION}`,
