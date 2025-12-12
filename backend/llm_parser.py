@@ -50,6 +50,45 @@ def check_rate_limit():
     requests_today += 1
 
 
+def handle_streaming_response(response):
+    """
+    Handle streaming SSE response from Chutes API
+
+    Args:
+        response: requests Response object with streaming enabled
+
+    Returns:
+        Complete content string assembled from streaming chunks
+    """
+    content = ""
+
+    for line in response.iter_lines():
+        if not line:
+            continue
+
+        line = line.decode('utf-8')
+
+        # SSE format: "data: {...}"
+        if line.startswith('data: '):
+            data_str = line[6:]  # Remove "data: " prefix
+
+            # Check for end marker
+            if data_str == '[DONE]':
+                break
+
+            try:
+                data = json.loads(data_str)
+                if 'choices' in data and len(data['choices']) > 0:
+                    delta = data['choices'][0].get('delta', {})
+                    chunk = delta.get('content', '')
+                    if chunk:  # Only append if chunk is not None
+                        content += chunk
+            except json.JSONDecodeError:
+                continue
+
+    return content
+
+
 def preprocess_html(html: str) -> str:
     """
     Remove high-token, low-value elements from HTML
@@ -273,7 +312,7 @@ HTML Fragment:
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 16000,
         "temperature": 0.1,
-        "stream": False
+        "stream": True
     }
 
     check_rate_limit()
@@ -289,14 +328,14 @@ HTML Fragment:
                     "Content-Type": "application/json"
                 },
                 json=payload,
+                stream=True,
                 timeout=REQUEST_TIMEOUT
             )
 
             if response.status_code == 200:
-                data = response.json()
-                if 'choices' in data and len(data['choices']) > 0:
-                    content = data['choices'][0]['message']['content']
+                content = handle_streaming_response(response)
 
+                if content:
                     # Remove markdown code blocks
                     if content.startswith('```html'):
                         content = content.split('```html\n', 1)[1].rsplit('```', 1)[0]
@@ -306,7 +345,7 @@ HTML Fragment:
                     print(f"    ✓ Chunk {chunk_num} processed ({len(content):,} chars)")
                     return content
                 else:
-                    raise APIError(f"No choices in response for chunk {chunk_num}")
+                    raise APIError(f"No content in streaming response for chunk {chunk_num}")
             elif response.status_code == 429:
                 print(f"    Rate limited on chunk {chunk_num}, waiting 60s...")
                 if attempt < retries - 1:
@@ -366,7 +405,7 @@ HTML:
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 16000,
         "temperature": 0.1,
-        "stream": False
+        "stream": True
     }
 
     for attempt in range(retries):
@@ -379,14 +418,14 @@ HTML:
                     "Content-Type": "application/json"
                 },
                 json=payload,
+                stream=True,
                 timeout=REQUEST_TIMEOUT
             )
 
             if response.status_code == 200:
-                data = response.json()
-                if 'choices' in data and len(data['choices']) > 0:
-                    content = data['choices'][0]['message']['content']
+                content = handle_streaming_response(response)
 
+                if content:
                     # Remove markdown code blocks if present
                     if content.startswith('```html'):
                         content = content.split('```html\n', 1)[1].rsplit('```', 1)[0]
@@ -396,7 +435,7 @@ HTML:
                     print(f"  ✓ API request successful ({len(content):,} chars returned)")
                     return content
                 else:
-                    raise APIError("No choices in API response")
+                    raise APIError("No content in streaming API response")
 
             elif response.status_code == 429:
                 # Rate limited by API
