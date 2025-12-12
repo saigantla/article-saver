@@ -2037,7 +2037,7 @@
                 }
             },
 
-            calculateReadingMap() {
+            async calculateReadingMap() {
                 const duration = els.audio.duration;
                 if (!duration || !isFinite(duration) || !els.rContent) return;
 
@@ -2055,7 +2055,7 @@
                     return;
                 }
 
-                // Calculate total "weight" based on words + punctuation pauses
+                // Calculate word-based heuristic estimates first
                 let totalWeight = 0;
                 const items = children.map(child => {
                     const text = child.textContent.trim();
@@ -2076,20 +2076,129 @@
                     return { child, weight, wordCount, text };
                 });
 
-                // Map each element to a time range based on its weight
+                // Calculate estimated segment boundaries using word weights
                 let currentTime = 0;
-                state.readingMap = items.map(item => {
+                const heuristicBoundaries = [];
+                items.forEach((item, idx) => {
                     const segmentDuration = (item.weight / totalWeight) * duration;
-                    const entry = {
-                        el: item.child,
+                    heuristicBoundaries.push({
+                        idx: idx,
                         start: currentTime,
                         end: currentTime + segmentDuration
-                    };
+                    });
                     currentTime += segmentDuration;
-                    return entry;
                 });
 
-                console.log(`Reading map created: ${state.readingMap.length} segments, ${totalWeight} words over ${duration.toFixed(1)}s`);
+                // Try to detect actual pauses in the audio
+                let detectedPauses = [];
+                try {
+                    detectedPauses = await app.analyzeAudioForPauses();
+                    console.log(`Detected ${detectedPauses.length} pauses in audio`);
+                } catch (err) {
+                    console.warn('Audio pause detection failed, using heuristic only:', err);
+                }
+
+                // Hybrid approach: Use heuristic boundaries, but snap to nearby detected pauses
+                const snapTolerance = 0.75; // Look for pauses within ±0.75s of heuristic estimate
+                let snappedCount = 0;
+                let previousEnd = 0;
+
+                state.readingMap = items.map((item, idx) => {
+                    const heuristic = heuristicBoundaries[idx];
+                    let actualStart = previousEnd;
+                    let actualEnd = heuristic.end;
+
+                    // For the end boundary (start of next segment), try to snap to a detected pause
+                    if (idx < items.length - 1 && detectedPauses.length > 0) {
+                        // Find the nearest pause to our heuristic end time
+                        const nearbyPause = detectedPauses.find(pauseTime => {
+                            return Math.abs(pauseTime - heuristic.end) <= snapTolerance;
+                        });
+
+                        if (nearbyPause) {
+                            actualEnd = nearbyPause;
+                            snappedCount++;
+                        }
+                    }
+
+                    // Last segment always ends at duration
+                    if (idx === items.length - 1) {
+                        actualEnd = duration;
+                    }
+
+                    // Update previousEnd for next iteration
+                    previousEnd = actualEnd;
+
+                    return {
+                        el: item.child,
+                        start: actualStart,
+                        end: actualEnd
+                    };
+                });
+
+                console.log(`Reading map created: ${state.readingMap.length} segments (${snappedCount} snapped to detected pauses, ${items.length - snappedCount} using heuristic)`);
+            },
+
+            async analyzeAudioForPauses() {
+                if (!els.audio || !els.audio.src) {
+                    throw new Error('No audio source available');
+                }
+
+                // Fetch the audio file
+                const response = await fetch(els.audio.src);
+                const arrayBuffer = await response.arrayBuffer();
+
+                // Create audio context and decode
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+                // Get audio data (use first channel if stereo)
+                const channelData = audioBuffer.getChannelData(0);
+                const sampleRate = audioBuffer.sampleRate;
+
+                // Parameters for pause detection
+                const windowSize = Math.floor(sampleRate * 0.05); // 50ms windows
+                const silenceThreshold = 0.02; // Amplitude threshold for silence
+                const minPauseDuration = 0.3; // Minimum 300ms pause to detect (we'll filter by proximity later)
+
+                const pauses = [];
+                let silenceStart = null;
+
+                // Analyze audio in windows
+                for (let i = 0; i < channelData.length; i += windowSize) {
+                    // Calculate RMS (root mean square) for this window
+                    let sum = 0;
+                    const end = Math.min(i + windowSize, channelData.length);
+                    for (let j = i; j < end; j++) {
+                        sum += channelData[j] * channelData[j];
+                    }
+                    const rms = Math.sqrt(sum / (end - i));
+
+                    const currentTime = i / sampleRate;
+
+                    if (rms < silenceThreshold) {
+                        // We're in silence
+                        if (silenceStart === null) {
+                            silenceStart = currentTime;
+                        }
+                    } else {
+                        // We're in audio
+                        if (silenceStart !== null) {
+                            const pauseDuration = currentTime - silenceStart;
+                            if (pauseDuration >= minPauseDuration) {
+                                // Found a significant pause - use the midpoint
+                                pauses.push(silenceStart + pauseDuration / 2);
+                            }
+                            silenceStart = null;
+                        }
+                    }
+                }
+
+                // Close audio context to free resources
+                audioContext.close();
+
+                console.log(`Detected ${pauses.length} pauses in audio:`, pauses.map(p => p.toFixed(2) + 's'));
+                return pauses;
             },
 
             toggleAudioPlay() {
