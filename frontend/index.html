@@ -116,6 +116,42 @@
         .custom-checkbox.checked {
             border-color: #00f3ff;
         }
+
+        /* Karaoke-Style Audio Sync Highlighting */
+        .audio-mode .prose-custom p,
+        .audio-mode .prose-custom h1,
+        .audio-mode .prose-custom h2,
+        .audio-mode .prose-custom h3,
+        .audio-mode .prose-custom h4,
+        .audio-mode .prose-custom h5,
+        .audio-mode .prose-custom h6,
+        .audio-mode .prose-custom blockquote,
+        .audio-mode .prose-custom ul,
+        .audio-mode .prose-custom ol {
+            transition: opacity 0.5s ease, color 0.3s ease, border-color 0.3s ease;
+            opacity: 0.4; /* Dim inactive blocks */
+            cursor: pointer; /* Indicate clickable */
+        }
+        .audio-mode .prose-custom p:hover,
+        .audio-mode .prose-custom h1:hover,
+        .audio-mode .prose-custom h2:hover,
+        .audio-mode .prose-custom h3:hover,
+        .audio-mode .prose-custom h4:hover,
+        .audio-mode .prose-custom h5:hover,
+        .audio-mode .prose-custom h6:hover,
+        .audio-mode .prose-custom blockquote:hover,
+        .audio-mode .prose-custom ul:hover,
+        .audio-mode .prose-custom ol:hover {
+            opacity: 0.7; /* Slight hover effect */
+        }
+        .audio-mode .prose-custom .active-reading-block {
+            opacity: 1 !important;
+            color: #fff;
+            /* Highlight effect with cyan border */
+            border-left: 2px solid #00f3ff;
+            padding-left: 1rem;
+            margin-left: -1rem; /* Compensate padding to keep text aligned */
+        }
     </style>
 </head>
 <body class="bg-obsidian text-gray-300 min-h-screen font-sans antialiased selection:bg-cyan selection:text-black overflow-x-hidden flex flex-col">
@@ -408,7 +444,8 @@
             searchMode: 'client',  // 'client' or 'server'
             // Audio state
             audioUrl: null,
-            isGeneratingAudio: false
+            isGeneratingAudio: false,
+            readingMap: []  // Maps paragraphs to audio timestamps for karaoke highlighting
         };
 
         // =============================================================================
@@ -1368,6 +1405,15 @@
                 if (els.audio) {
                     els.audio.pause();
                 }
+
+                // Clear audio mode and highlighting
+                if (els.rContent && els.rContent.parentElement) {
+                    els.rContent.parentElement.classList.remove('audio-mode');
+                }
+                if (state.readingMap) {
+                    state.readingMap.forEach(item => item.el.classList.remove('active-reading-block'));
+                }
+                state.readingMap = [];
             },
 
             async toggleReadStatus(id, markAsRead) {
@@ -1872,6 +1918,15 @@
                 state.audioUrl = null;
                 state.isGeneratingAudio = false;
 
+                // Clear audio mode and reset reading map
+                if (els.rContent && els.rContent.parentElement) {
+                    els.rContent.parentElement.classList.remove('audio-mode');
+                }
+                if (state.readingMap) {
+                    state.readingMap.forEach(item => item.el.classList.remove('active-reading-block'));
+                }
+                state.readingMap = [];
+
                 // Check if audio is available
                 if (article.audio && article.audio.available) {
                     // Audio already generated - set up player
@@ -1907,6 +1962,14 @@
                         els.audioBar.classList.remove('hidden', 'translate-y-full');
                         els.audioBar.classList.add('translate-y-0');
                     }
+                    // Enable audio mode
+                    if (els.rContent) {
+                        els.rContent.parentElement.classList.add('audio-mode');
+                    }
+                    // Calculate reading map if not already done
+                    if (state.readingMap.length === 0 && els.audio.duration) {
+                        app.calculateReadingMap();
+                    }
                     app.toggleAudioPlay();
                     return;
                 }
@@ -1935,6 +1998,12 @@
                         state.audioUrl = audioUrl;
                         if (els.audio) {
                             els.audio.src = audioUrl;
+
+                            // Wait for metadata to load before building map
+                            els.audio.onloadedmetadata = () => {
+                                app.calculateReadingMap();
+                                app.toggleAudioPlay();
+                            };
                         }
 
                         // Show audio bar
@@ -1943,8 +2012,10 @@
                             els.audioBar.classList.add('translate-y-0');
                         }
 
-                        // Auto-play
-                        app.toggleAudioPlay();
+                        // Enable audio mode styles
+                        if (els.rContent) {
+                            els.rContent.parentElement.classList.add('audio-mode');
+                        }
 
                         if (els.btnGenerateAudio) {
                             els.btnGenerateAudio.innerHTML = '<i class="fa-solid fa-headphones"></i><span>LISTEN</span>';
@@ -1964,6 +2035,61 @@
                         els.btnGenerateAudio.classList.remove('opacity-50', 'cursor-not-allowed');
                     }
                 }
+            },
+
+            calculateReadingMap() {
+                const duration = els.audio.duration;
+                if (!duration || !isFinite(duration) || !els.rContent) return;
+
+                // Get ALL significant text elements recursively (not just direct children)
+                const selector = 'p, blockquote, h1, h2, h3, h4, h5, h6, ul, ol';
+                const allElements = els.rContent.querySelectorAll(selector);
+
+                // Filter to only elements with meaningful text content
+                const children = Array.from(allElements).filter(el => {
+                    return el.textContent.trim().length > 0;
+                });
+
+                if (children.length === 0) {
+                    console.warn('No text elements found for reading map');
+                    return;
+                }
+
+                // Calculate total "weight" based on words + punctuation pauses
+                let totalWeight = 0;
+                const items = children.map(child => {
+                    const text = child.textContent.trim();
+
+                    // Count words (more accurate than characters for speech)
+                    const wordCount = text.split(/\s+/).length;
+
+                    // Count sentence-ending punctuation (adds pauses in TTS)
+                    const sentenceEnds = (text.match(/[.!?]+/g) || []).length;
+
+                    // Count commas/semicolons (shorter pauses)
+                    const shortPauses = (text.match(/[,;:]/g) || []).length;
+
+                    // Weight: 1 per word + 3 extra for sentence ends + 1 for short pauses
+                    const weight = wordCount + (sentenceEnds * 3) + shortPauses;
+
+                    totalWeight += weight;
+                    return { child, weight, wordCount, text };
+                });
+
+                // Map each element to a time range based on its weight
+                let currentTime = 0;
+                state.readingMap = items.map(item => {
+                    const segmentDuration = (item.weight / totalWeight) * duration;
+                    const entry = {
+                        el: item.child,
+                        start: currentTime,
+                        end: currentTime + segmentDuration
+                    };
+                    currentTime += segmentDuration;
+                    return entry;
+                });
+
+                console.log(`Reading map created: ${state.readingMap.length} segments, ${totalWeight} words over ${duration.toFixed(1)}s`);
             },
 
             toggleAudioPlay() {
@@ -2025,8 +2151,33 @@
             updateAudioProgress() {
                 if (!els.audio || !els.audio.duration || !els.audioProgress) return;
 
+                // Update progress bar
                 const percent = (els.audio.currentTime / els.audio.duration) * 100;
                 els.audioProgress.style.width = `${percent}%`;
+
+                // Update karaoke-style highlighting
+                const now = els.audio.currentTime;
+
+                if (state.readingMap && state.readingMap.length > 0) {
+                    state.readingMap.forEach(item => {
+                        if (now >= item.start && now < item.end) {
+                            if (!item.el.classList.contains('active-reading-block')) {
+                                // Clear previous highlights
+                                document.querySelectorAll('.active-reading-block').forEach(el =>
+                                    el.classList.remove('active-reading-block')
+                                );
+                                // Highlight current block
+                                item.el.classList.add('active-reading-block');
+
+                                // Auto-scroll to keep active block in view
+                                item.el.scrollIntoView({
+                                    behavior: 'smooth',
+                                    block: 'center'
+                                });
+                            }
+                        }
+                    });
+                }
             },
 
             onAudioEnded() {
@@ -2040,42 +2191,50 @@
                 if (els.audioProgress) {
                     els.audioProgress.style.width = '100%';
                 }
+
+                // Clear karaoke highlighting
+                if (state.readingMap) {
+                    state.readingMap.forEach(item => item.el.classList.remove('active-reading-block'));
+                }
             },
 
             scrubAudioByText(e) {
-                // Only scrub if audio bar is visible
+                // Only scrub if audio bar is visible and reading map exists
                 if (!state.audioUrl || !els.audioBar || els.audioBar.classList.contains('hidden')) {
                     return;
                 }
                 if (!els.audio || !els.audio.duration || !isFinite(els.audio.duration)) {
                     return;
                 }
-
-                // Get click position relative to article content
-                const rect = els.rContent.getBoundingClientRect();
-                const totalHeight = els.rContent.offsetHeight;
-                const clickY = e.pageY - (rect.top + window.scrollY);
-
-                // Calculate percentage through article
-                const percentage = Math.min(Math.max(clickY / totalHeight, 0), 1);
-
-                // Seek to that percentage in audio
-                els.audio.currentTime = els.audio.duration * percentage;
-
-                // Resume playback if paused
-                if (els.audio.paused) {
-                    app.toggleAudioPlay();
+                if (!state.readingMap || state.readingMap.length === 0) {
+                    return;
                 }
 
-                // Visual feedback
-                if (els.audioStatusText) {
-                    const pctDisplay = Math.round(percentage * 100);
-                    els.audioStatusText.textContent = `SEEKING TO ${pctDisplay}%`;
-                    setTimeout(() => {
-                        if (els.audioStatusText) {
-                            els.audioStatusText.textContent = 'PLAYING AUDIO';
-                        }
-                    }, 800);
+                // Find which paragraph/block was clicked
+                const target = e.target.closest('p, h1, h2, h3, h4, h5, h6, blockquote, ul, ol');
+                if (!target) return;
+
+                // Find the segment for this element in the reading map
+                const segment = state.readingMap.find(item => item.el === target);
+
+                if (segment) {
+                    // Seek to the start of this paragraph
+                    els.audio.currentTime = segment.start;
+
+                    // Resume playback if paused
+                    if (els.audio.paused) {
+                        app.toggleAudioPlay();
+                    }
+
+                    // Visual feedback
+                    if (els.audioStatusText) {
+                        els.audioStatusText.textContent = 'SEEKING TO PARAGRAPH...';
+                        setTimeout(() => {
+                            if (els.audioStatusText) {
+                                els.audioStatusText.textContent = 'PLAYING AUDIO';
+                            }
+                        }, 500);
+                    }
                 }
             },
 
