@@ -1351,20 +1351,17 @@
                     return;
                 }
 
-                if (mode === 'llm') {
-                    const article = state.articles.find(a => a.id === id);
-                    if (article && article.llm_content) {
-                        els.rContent.innerHTML = utils.sanitizeHtml(article.llm_content);
-                    } else {
-                        els.rContent.innerHTML = `<div class="text-center py-12">Loading AI content...</div>`;
-                    }
-                    return;
-                }
-
-                // Regular parser
+                // All parsers (including LLM) use parser_results
                 const parserResult = state.parserResults ? state.parserResults[mode] : null;
-                if (parserResult && parserResult.success && parserResult.htmlContent) {
-                    els.rContent.innerHTML = utils.sanitizeHtml(parserResult.htmlContent);
+
+                if (parserResult && parserResult.success) {
+                    // LLM stores in 'content', others store in 'htmlContent'
+                    const content = parserResult.content || parserResult.htmlContent;
+                    if (content) {
+                        els.rContent.innerHTML = utils.sanitizeHtml(content);
+                    } else {
+                        els.rContent.innerHTML = `<div class="text-center py-12 text-dim">Parser content not available.</div>`;
+                    }
                 } else {
                     els.rContent.innerHTML = `<div class="text-center py-12 text-dim">Parser content not available.</div>`;
                 }
@@ -1379,25 +1376,89 @@
                 if (els.redriveIcon) els.redriveIcon.classList.add('fa-spin');
 
                 try {
-                    // Trigger reprocessing
-                    await api.reprocessParser(id, mode);
+                    // Use streaming for LLM parser, polling for others
+                    if (mode === 'llm') {
+                        await this.redriveParsingStreaming(id, mode);
+                    } else {
+                        await this.redriveParsingPolling(id, mode);
+                    }
+                } catch (error) {
+                    console.error('Redrive failed:', error);
+                    if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                    ui.showError("Failed to reprocess: " + error.message);
+                }
+            },
 
-                    // Poll for updated results (check every 2 seconds for up to 30 seconds)
-                    const maxAttempts = 15;  // 30 seconds total
-                    let attempts = 0;
+            async redriveParsingStreaming(id, mode) {
+                // Show initial status
+                if (els.rContent) {
+                    els.rContent.innerHTML = `
+                        <div class="bg-cyan-900/20 border border-cyan-500/30 rounded-lg p-6 text-center">
+                            <i class="fa-solid fa-spinner fa-spin text-cyan-400 text-2xl mb-3"></i>
+                            <h3 class="text-cyan-400 font-mono text-sm mb-2">PROCESSING</h3>
+                            <p class="text-dim text-xs" id="streaming-status">Starting...</p>
+                        </div>
+                        <div id="streaming-content" class="mt-4 prose prose-invert max-w-none hidden"></div>
+                    `;
+                }
 
-                    const pollForResults = async () => {
-                        attempts++;
+                const statusEl = document.getElementById('streaming-status');
+                const contentEl = document.getElementById('streaming-content');
+                let accumulatedContent = '';
 
-                        try {
-                            // Fetch the updated article
-                            const article = await api.getArticle(id);
-                            state.parserResults = article.parser_results || {};
+                return new Promise((resolve, reject) => {
+                    const eventSource = new EventSource(`/articles/${id}/reprocess-stream`);
 
-                            // Also update the article in the cached list
+                    eventSource.addEventListener('status', (e) => {
+                        const data = JSON.parse(e.data);
+                        console.log('Status:', data);
+
+                        // Update status message
+                        if (statusEl) {
+                            statusEl.textContent = data.message || 'Processing...';
+                        }
+                    });
+
+                    eventSource.addEventListener('chunk', (e) => {
+                        const data = JSON.parse(e.data);
+                        console.log('Chunk received:', data.text.length, 'chars');
+
+                        // Accumulate content
+                        accumulatedContent += data.text;
+
+                        // Show content container if hidden
+                        if (contentEl && contentEl.classList.contains('hidden')) {
+                            contentEl.classList.remove('hidden');
+                        }
+
+                        // Update displayed content with accumulated HTML
+                        if (contentEl) {
+                            contentEl.innerHTML = accumulatedContent;
+                        }
+                    });
+
+                    eventSource.addEventListener('done', async (e) => {
+                        const data = JSON.parse(e.data);
+                        console.log('Streaming complete:', data);
+
+                        eventSource.close();
+
+                        // Update parser results with the streamed result
+                        if (data.result && data.result.success) {
+                            state.parserResults = state.parserResults || {};
+                            state.parserResults[mode] = data.result;
+
+                            // Display the content immediately (already have it from streaming!)
+                            if (els.rContent) {
+                                els.rContent.innerHTML = data.content || data.result.content;
+                            }
+                        }
+
+                        // Fetch updated article metadata (async, don't block display)
+                        api.getArticle(id).then(article => {
+                            // Update cached article with new metadata
                             const cachedArticle = state.articles.find(a => a.id === id);
                             if (cachedArticle) {
-                                // Update relevant fields from the refreshed article
                                 Object.assign(cachedArticle, {
                                     title: article.title,
                                     author: article.author,
@@ -1407,64 +1468,142 @@
                                 });
                             }
 
-                            // Check if the current parser has new results
-                            const parserResult = state.parserResults[mode];
+                            // Update state with latest parser results from DB
+                            state.parserResults = article.parser_results || state.parserResults;
+                        }).catch(err => {
+                            console.warn('Failed to fetch updated article metadata:', err);
+                            // Content is already displayed, so this is non-critical
+                        });
 
-                            // If we have a result (success or failure), stop polling
-                            if (parserResult) {
-                                // Update the content display
-                                await app.setParser(mode);
+                        if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                        resolve();
+                    });
 
-                                if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                    eventSource.addEventListener('error', (e) => {
+                        let errorMsg = 'Unknown error';
 
-                                if (parserResult.success) {
-                                    console.log(`Parser ${mode} results updated successfully`);
-                                } else {
-                                    console.warn(`Parser ${mode} failed:`, parserResult.error || 'Unknown error');
-                                    // Show error message to user
-                                    if (els.rContent) {
-                                        const errorMsg = parserResult.error || 'Parser failed';
-                                        els.rContent.innerHTML = `
-                                            <div class="bg-red-900/20 border border-red-500/30 rounded-lg p-6 text-center">
-                                                <i class="fa-solid fa-triangle-exclamation text-red-400 text-2xl mb-3"></i>
-                                                <h3 class="text-red-400 font-mono text-sm mb-2">PARSER FAILED</h3>
-                                                <p class="text-dim text-xs">${utils.escapeHtml(errorMsg)}</p>
-                                            </div>
-                                        `;
-                                    }
-                                }
-                                return true;
+                        if (e.data) {
+                            try {
+                                const data = JSON.parse(e.data);
+                                errorMsg = data.message || errorMsg;
+                            } catch (err) {
+                                // Ignore parse error
                             }
+                        }
 
-                            // Continue polling if we haven't exceeded max attempts
-                            if (attempts < maxAttempts) {
-                                setTimeout(() => pollForResults(), 2000);
-                                return false;
-                            } else {
-                                // Timeout - stop spinning but don't show error (might still be processing)
-                                if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
-                                console.log(`Polling timeout - parser may still be processing`);
-                                return false;
-                            }
-                        } catch (error) {
-                            console.error('Error polling for results:', error);
-                            if (attempts < maxAttempts) {
-                                setTimeout(() => pollForResults(), 2000);
-                            } else {
-                                if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
-                            }
-                            return false;
+                        console.error('Streaming error:', errorMsg);
+                        eventSource.close();
+
+                        // Show error message
+                        if (els.rContent) {
+                            els.rContent.innerHTML = `
+                                <div class="bg-red-900/20 border border-red-500/30 rounded-lg p-6 text-center">
+                                    <i class="fa-solid fa-triangle-exclamation text-red-400 text-2xl mb-3"></i>
+                                    <h3 class="text-red-400 font-mono text-sm mb-2">PARSER FAILED</h3>
+                                    <p class="text-dim text-xs">${utils.escapeHtml(errorMsg)}</p>
+                                </div>
+                            `;
+                        }
+
+                        if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                        reject(new Error(errorMsg));
+                    });
+
+                    // Handle connection errors
+                    eventSource.onerror = (e) => {
+                        // Only handle if not already closed
+                        if (eventSource.readyState !== EventSource.CLOSED) {
+                            console.error('EventSource connection error');
+                            eventSource.close();
+
+                            if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                            reject(new Error('Connection lost'));
                         }
                     };
+                });
+            },
 
-                    // Start polling after a short delay
-                    setTimeout(() => pollForResults(), 2000);
+            async redriveParsingPolling(id, mode) {
+                // Trigger reprocessing
+                await api.reprocessParser(id, mode);
 
-                } catch (error) {
-                    console.error('Redrive failed:', error);
-                    if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
-                    ui.showError("Failed to reprocess: " + error.message);
-                }
+                // Poll for updated results (check every 2 seconds for up to 30 seconds)
+                const maxAttempts = 15;  // 30 seconds total
+                let attempts = 0;
+
+                const pollForResults = async () => {
+                    attempts++;
+
+                    try {
+                        // Fetch the updated article
+                        const article = await api.getArticle(id);
+                        state.parserResults = article.parser_results || {};
+
+                        // Also update the article in the cached list
+                        const cachedArticle = state.articles.find(a => a.id === id);
+                        if (cachedArticle) {
+                            // Update relevant fields from the refreshed article
+                            Object.assign(cachedArticle, {
+                                title: article.title,
+                                author: article.author,
+                                snippet: article.snippet,
+                                text_length: article.text_length,
+                                readTime: article.readTime
+                            });
+                        }
+
+                        // Check if the current parser has new results
+                        const parserResult = state.parserResults[mode];
+
+                        // If we have a result (success or failure), stop polling
+                        if (parserResult) {
+                            // Update the content display
+                            await app.setParser(mode);
+
+                            if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+
+                            if (parserResult.success) {
+                                console.log(`Parser ${mode} results updated successfully`);
+                            } else {
+                                console.warn(`Parser ${mode} failed:`, parserResult.error || 'Unknown error');
+                                // Show error message to user
+                                if (els.rContent) {
+                                    const errorMsg = parserResult.error || 'Parser failed';
+                                    els.rContent.innerHTML = `
+                                        <div class="bg-red-900/20 border border-red-500/30 rounded-lg p-6 text-center">
+                                            <i class="fa-solid fa-triangle-exclamation text-red-400 text-2xl mb-3"></i>
+                                            <h3 class="text-red-400 font-mono text-sm mb-2">PARSER FAILED</h3>
+                                            <p class="text-dim text-xs">${utils.escapeHtml(errorMsg)}</p>
+                                        </div>
+                                    `;
+                                }
+                            }
+                            return true;
+                        }
+
+                        // Continue polling if we haven't exceeded max attempts
+                        if (attempts < maxAttempts) {
+                            setTimeout(() => pollForResults(), 2000);
+                            return false;
+                        } else {
+                            // Timeout - stop spinning but don't show error (might still be processing)
+                            if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                            console.log(`Polling timeout - parser may still be processing`);
+                            return false;
+                        }
+                    } catch (error) {
+                        console.error('Error polling for results:', error);
+                        if (attempts < maxAttempts) {
+                            setTimeout(() => pollForResults(), 2000);
+                        } else {
+                            if (els.redriveIcon) els.redriveIcon.classList.remove('fa-spin');
+                        }
+                        return false;
+                    }
+                };
+
+                // Start polling after a short delay
+                setTimeout(() => pollForResults(), 2000);
             },
 
             async deleteArticle(id) {

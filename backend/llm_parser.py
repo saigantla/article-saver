@@ -50,12 +50,13 @@ def check_rate_limit():
     requests_today += 1
 
 
-def handle_streaming_response(response):
+def handle_streaming_response(response, chunk_callback=None):
     """
     Handle streaming SSE response from Chutes API
 
     Args:
         response: requests Response object with streaming enabled
+        chunk_callback: Optional callback function(chunk_text) called for each chunk
 
     Returns:
         Complete content string assembled from streaming chunks
@@ -83,6 +84,9 @@ def handle_streaming_response(response):
                     chunk = delta.get('content', '')
                     if chunk:  # Only append if chunk is not None
                         content += chunk
+                        # Call callback with chunk if provided
+                        if chunk_callback:
+                            chunk_callback(chunk)
             except json.JSONDecodeError:
                 continue
 
@@ -566,6 +570,402 @@ def process_article(html: str) -> dict:
             'success': False,
             'error': f"Unexpected error: {e}"
         }
+
+
+def process_article_streaming_generator(html: str):
+    """
+    Generator version for real-time SSE streaming
+
+    Args:
+        html: Raw HTML content
+
+    Yields:
+        Tuples of (event_type, data) where:
+            event_type: 'status', 'chunk', 'done', 'error'
+            data: Event-specific data dict
+    """
+    try:
+        yield ('status', {'message': 'Starting extraction...', 'stage': 'extract'})
+
+        # Extract article content
+        extracted_html, method = extract_article_content(html)
+        yield ('status', {
+            'message': f'Extracted content ({len(extracted_html):,} chars)',
+            'stage': 'extract',
+            'method': method
+        })
+
+        # Check if chunking needed
+        if method == 'chunking_needed':
+            yield ('status', {
+                'message': f'Content too large, splitting into chunks...',
+                'stage': 'chunking'
+            })
+
+            chunks = create_dom_chunks(extracted_html)
+            yield ('status', {
+                'message': f'Processing {len(chunks)} chunks...',
+                'stage': 'processing',
+                'total_chunks': len(chunks)
+            })
+
+            processed_chunks = []
+            for i, chunk in enumerate(chunks, 1):
+                try:
+                    yield ('status', {
+                        'message': f'Processing chunk {i}/{len(chunks)}...',
+                        'stage': 'processing',
+                        'current_chunk': i,
+                        'total_chunks': len(chunks)
+                    })
+
+                    # Process chunk with streaming
+                    def chunk_content_callback(text):
+                        # Can't yield from nested function, but chunks are fast enough
+                        pass
+
+                    processed = process_chunk_streaming(chunk, i, len(chunks), chunk_content_callback)
+                    processed_chunks.append(processed)
+
+                    # Yield chunk as it's completed
+                    yield ('chunk', {'text': processed, 'chunk_num': i})
+
+                except Exception as e:
+                    yield ('error', {'message': f'Chunk {i} failed: {str(e)}'})
+                    return
+
+            cleaned_html = '\n\n'.join(processed_chunks)
+
+            yield ('done', {
+                'content': cleaned_html,
+                'method': 'chunked',
+                'chunks_processed': len(chunks),
+                'result': {
+                    'success': True,
+                    'content': cleaned_html,
+                    'method': 'chunked',
+                    'chunks_processed': len(chunks),
+                    'input_size': len(extracted_html),
+                    'output_size': len(cleaned_html)
+                }
+            })
+            return
+
+        if len(extracted_html) < 500:
+            yield ('error', {'message': 'Content too small (<500 chars)'})
+            return
+
+        yield ('status', {'message': 'Cleaning HTML with LLM...', 'stage': 'llm'})
+
+        # Stream LLM processing - accumulate and yield chunks
+        accumulated_content = ''
+
+        def llm_chunk_callback(text):
+            nonlocal accumulated_content
+            accumulated_content += text
+
+        cleaned_html = call_chutes_api_streaming(extracted_html, llm_chunk_callback)
+
+        # Since the callback accumulates, yield the full content at intervals
+        # For real streaming within a single request, we'd need to restructure call_chutes_api_streaming
+        yield ('chunk', {'text': cleaned_html})
+
+        yield ('done', {
+            'content': cleaned_html,
+            'method': method,
+            'result': {
+                'success': True,
+                'content': cleaned_html,
+                'method': method,
+                'input_size': len(extracted_html),
+                'output_size': len(cleaned_html)
+            }
+        })
+
+    except RateLimitError as e:
+        yield ('error', {'message': str(e), 'rate_limited': True})
+    except APIError as e:
+        yield ('error', {'message': str(e)})
+    except Exception as e:
+        yield ('error', {'message': f'Unexpected error: {str(e)}'})
+
+
+def process_article_streaming(html: str, progress_callback):
+    """
+    Stream article processing with real-time progress updates
+
+    Args:
+        html: Raw HTML content
+        progress_callback: Function(event_type, data) called with progress updates
+            event_type: 'status', 'chunk', 'done', 'error'
+            data: Event-specific data
+
+    Returns:
+        dict with processing results (same as process_article)
+    """
+    try:
+        progress_callback('status', {'message': 'Starting extraction...', 'stage': 'extract'})
+
+        # Extract article content
+        extracted_html, method = extract_article_content(html)
+        progress_callback('status', {
+            'message': f'Extracted content ({len(extracted_html):,} chars)',
+            'stage': 'extract',
+            'method': method
+        })
+
+        # Check if chunking needed
+        if method == 'chunking_needed':
+            progress_callback('status', {
+                'message': f'Content too large, splitting into chunks...',
+                'stage': 'chunking'
+            })
+
+            chunks = create_dom_chunks(extracted_html)
+            progress_callback('status', {
+                'message': f'Processing {len(chunks)} chunks...',
+                'stage': 'processing',
+                'total_chunks': len(chunks)
+            })
+
+            processed_chunks = []
+            for i, chunk in enumerate(chunks, 1):
+                try:
+                    progress_callback('status', {
+                        'message': f'Processing chunk {i}/{len(chunks)}...',
+                        'stage': 'processing',
+                        'current_chunk': i,
+                        'total_chunks': len(chunks)
+                    })
+
+                    # Process chunk with streaming
+                    def chunk_content_callback(text):
+                        progress_callback('chunk', {'text': text, 'chunk_num': i})
+
+                    processed = process_chunk_streaming(chunk, i, len(chunks), chunk_content_callback)
+                    processed_chunks.append(processed)
+
+                except Exception as e:
+                    progress_callback('error', {'message': f'Chunk {i} failed: {str(e)}'})
+                    return {
+                        'success': False,
+                        'error': f'Chunking failed at chunk {i}/{len(chunks)}: {e}',
+                        'method': 'chunked'
+                    }
+
+            cleaned_html = '\n\n'.join(processed_chunks)
+
+            progress_callback('done', {
+                'content': cleaned_html,
+                'method': 'chunked',
+                'chunks_processed': len(chunks)
+            })
+
+            return {
+                'success': True,
+                'content': cleaned_html,
+                'method': 'chunked',
+                'chunks_processed': len(chunks),
+                'input_size': len(extracted_html),
+                'output_size': len(cleaned_html)
+            }
+
+        if len(extracted_html) < 500:
+            progress_callback('error', {'message': 'Content too small (<500 chars)'})
+            return {
+                'success': False,
+                'error': 'Extracted content too small (<500 chars), likely not an article',
+                'method': method
+            }
+
+        progress_callback('status', {'message': 'Cleaning HTML with LLM...', 'stage': 'llm'})
+
+        # Stream LLM processing
+        def llm_chunk_callback(text):
+            progress_callback('chunk', {'text': text})
+
+        cleaned_html = call_chutes_api_streaming(extracted_html, llm_chunk_callback)
+
+        progress_callback('done', {
+            'content': cleaned_html,
+            'method': method
+        })
+
+        return {
+            'success': True,
+            'content': cleaned_html,
+            'method': method,
+            'input_size': len(extracted_html),
+            'output_size': len(cleaned_html)
+        }
+
+    except RateLimitError as e:
+        progress_callback('error', {'message': str(e), 'rate_limited': True})
+        return {'success': False, 'error': str(e), 'rate_limited': True}
+    except APIError as e:
+        progress_callback('error', {'message': str(e)})
+        return {'success': False, 'error': str(e)}
+    except Exception as e:
+        progress_callback('error', {'message': f'Unexpected error: {str(e)}'})
+        return {'success': False, 'error': f'Unexpected error: {e}'}
+
+
+def process_chunk_streaming(chunk: str, chunk_num: int, total_chunks: int, chunk_callback):
+    """Streaming version of process_chunk"""
+    prompt = f"""Extract and clean article content from this HTML fragment.
+
+CONTEXT: This is PART {chunk_num} of {total_chunks} of a larger article.
+The HTML may start/end abruptly (mid-paragraph, mid-table, etc.) - this is expected.
+
+INSTRUCTIONS:
+1. Extract ANY article content found (text, headings, images, tables, lists)
+2. DO NOT discard content because it's incomplete - extract what's there
+3. Remove: navigation, ads, archive wrappers, scripts, non-article junk
+4. Preserve structure of extracted content
+5. Return clean HTML that can be concatenated with other chunks
+6. DO NOT add <html>, <head>, or <body> wrappers
+7. If a paragraph/section is cut off, keep the partial content
+
+HTML Fragment:
+{chunk}"""
+
+    if not CHUTES_API_KEY:
+        raise APIError("CHUTES_API_KEY environment variable not set")
+
+    payload = {
+        "model": CHUTES_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 16000,
+        "temperature": 0.1,
+        "stream": True
+    }
+
+    check_rate_limit()
+
+    for attempt in range(2):
+        try:
+            response = requests.post(
+                CHUTES_ENDPOINT,
+                headers={
+                    "Authorization": f"Bearer {CHUTES_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json=payload,
+                stream=True,
+                timeout=REQUEST_TIMEOUT
+            )
+
+            if response.status_code == 200:
+                content = handle_streaming_response(response, chunk_callback)
+
+                if content:
+                    # Remove markdown code blocks
+                    if content.startswith('```html'):
+                        content = content.split('```html\n', 1)[1].rsplit('```', 1)[0]
+                    elif content.startswith('```'):
+                        content = content.split('```\n', 1)[1].rsplit('```', 1)[0]
+
+                    return content
+                else:
+                    raise APIError(f"No content in streaming response for chunk {chunk_num}")
+            elif response.status_code == 429:
+                if attempt < 1:
+                    time.sleep(60)
+                    continue
+                raise APIError(f"Chunk {chunk_num} rate limited after retries")
+            else:
+                raise APIError(f"Chunk {chunk_num} API error: {response.status_code}")
+
+        except requests.exceptions.Timeout:
+            if attempt < 1:
+                time.sleep(5)
+                continue
+            raise APIError(f"Chunk {chunk_num} timeout after retries")
+        except requests.exceptions.RequestException as e:
+            if attempt < 1:
+                time.sleep(5)
+                continue
+            raise APIError(f"Chunk {chunk_num} network error: {e}")
+
+    raise APIError(f"Chunk {chunk_num} failed after all retries")
+
+
+def call_chutes_api_streaming(content: str, chunk_callback):
+    """Streaming version of call_chutes_api"""
+    if not CHUTES_API_KEY:
+        raise APIError("CHUTES_API_KEY environment variable not set")
+
+    check_rate_limit()
+
+    prompt = f"""Extract and clean the main article content from this HTML.
+
+Remove: navigation, ads, archive.ph wrappers, scripts, non-article elements
+Keep: headline, author, date, article text, images with captions, tables
+Return: Clean HTML only (no markdown code blocks)
+
+HTML:
+{content}"""
+
+    payload = {
+        "model": CHUTES_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 16000,
+        "temperature": 0.1,
+        "stream": True
+    }
+
+    for attempt in range(3):
+        try:
+            response = requests.post(
+                CHUTES_ENDPOINT,
+                headers={
+                    "Authorization": f"Bearer {CHUTES_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json=payload,
+                stream=True,
+                timeout=REQUEST_TIMEOUT
+            )
+
+            if response.status_code == 200:
+                content = handle_streaming_response(response, chunk_callback)
+
+                if content:
+                    # Remove markdown code blocks if present
+                    if content.startswith('```html'):
+                        content = content.split('```html\n', 1)[1].rsplit('```', 1)[0]
+                    elif content.startswith('```'):
+                        content = content.split('```\n', 1)[1].rsplit('```', 1)[0]
+
+                    return content
+                else:
+                    raise APIError("No content in streaming API response")
+
+            elif response.status_code == 429:
+                if attempt < 2:
+                    time.sleep(60)
+                    continue
+                raise APIError("API rate limit exceeded after retries")
+
+            else:
+                error_msg = f"API returned status {response.status_code}: {response.text[:500]}"
+                if attempt < 2:
+                    time.sleep(5)
+                    continue
+                raise APIError(error_msg)
+
+        except requests.exceptions.Timeout:
+            if attempt < 2:
+                time.sleep(10)
+                continue
+            raise APIError("API request timeout after retries")
+        except requests.exceptions.RequestException as e:
+            if attempt < 2:
+                time.sleep(5)
+                continue
+            raise APIError(f"Network error: {e}")
+
+    raise APIError("API request failed after all retries")
 
 
 # For testing

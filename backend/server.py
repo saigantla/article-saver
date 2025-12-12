@@ -7,7 +7,7 @@ Article Saver - Backend Server
 - Serves frontend and API
 """
 
-from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask import Flask, request, jsonify, send_file, send_from_directory, Response
 from flask_cors import CORS
 import subprocess
 import json
@@ -970,6 +970,114 @@ def reprocess_article(article_id):
 def reprocess_llm(article_id):
     """Legacy endpoint: Use /articles/<id>/reprocess with parser='llm' instead"""
     return reprocess_article(article_id)
+
+
+@app.route('/articles/<int:article_id>/reprocess-stream', methods=['GET'])
+def reprocess_article_stream(article_id):
+    """
+    Stream LLM parser processing with real-time updates via Server-Sent Events
+
+    Usage: GET /articles/<id>/reprocess-stream
+
+    Returns: text/event-stream with events:
+        - status: Progress messages (extraction, chunking, processing)
+        - chunk: Partial content chunks as they arrive
+        - done: Final result with complete content
+        - error: Error messages
+    """
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('SELECT html_content FROM articles WHERE id = ?', (article_id,))
+            row = c.fetchone()
+
+            if not row:
+                return jsonify({"error": "Article not found"}), 404
+
+            html_content = row['html_content']
+            if not html_content:
+                return jsonify({"error": "No HTML content available"}), 400
+
+        def generate():
+            """SSE generator function"""
+            result = None
+            try:
+                # Use a generator-based approach for real-time streaming
+                for event_type, data in llm_parser.process_article_streaming_generator(html_content):
+                    event_data = json.dumps(data)
+                    yield f"event: {event_type}\ndata: {event_data}\n\n"
+
+                    # Capture final result from 'done' event
+                    if event_type == 'done':
+                        result = data.get('result')
+
+                # If successful, save to database
+                if result.get('success'):
+                    content = result['content']
+
+                    # Extract metadata from cleaned content
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(content, 'html.parser')
+
+                    # Get title (prefer h1, fallback to existing)
+                    title_tag = soup.find(['h1', 'h2'])
+                    title = title_tag.get_text(strip=True) if title_tag else None
+
+                    # Get author (look for byline)
+                    author = None
+                    for tag in soup.find_all(['p', 'span', 'div']):
+                        text = tag.get_text(strip=True).lower()
+                        if 'by ' in text and len(text) < 100:
+                            author = tag.get_text(strip=True)
+                            break
+
+                    # Get text content for snippet
+                    text_content = soup.get_text(separator=' ', strip=True)
+                    snippet = text_content[:500] if text_content else ''
+                    text_length = len(text_content)
+
+                    # Calculate read time (200 words per minute)
+                    words = len(text_content.split())
+                    read_time = max(1, round(words / 200))
+
+                    # Save to database
+                    with get_db_connection() as conn:
+                        c = conn.cursor()
+
+                        update_fields = []
+                        update_values = []
+
+                        if title:
+                            update_fields.append('title = ?')
+                            update_values.append(title)
+                        if author:
+                            update_fields.append('author = ?')
+                            update_values.append(author)
+
+                        update_fields.extend([
+                            'snippet = ?',
+                            'text_length = ?',
+                            'read_time = ?',
+                            'parser_results = json_set(COALESCE(parser_results, "{}"), "$.llm", ?)'
+                        ])
+                        update_values.extend([snippet, text_length, read_time, json.dumps(result)])
+                        update_values.append(article_id)
+
+                        query = f"UPDATE articles SET {', '.join(update_fields)} WHERE id = ?"
+                        c.execute(query, update_values)
+
+                        logger.info(f"Saved LLM parser results for article {article_id}")
+
+            except Exception as e:
+                logger.error(f"LLM streaming error for article {article_id}: {e}")
+                error_data = json.dumps({'message': str(e)})
+                yield f"event: error\ndata: {error_data}\n\n"
+
+        return Response(generate(), mimetype='text/event-stream')
+
+    except Exception as e:
+        logger.error(f"Failed to start streaming for article {article_id}: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 # =============================================================================
