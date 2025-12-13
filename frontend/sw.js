@@ -1,7 +1,7 @@
 // Service Worker for Article Saver - Offline Support
 // Handles caching of app shell, CDN resources, and API responses
 
-const CACHE_VERSION = 'v21';  // Added karaoke-style highlighting for audio playback
+const CACHE_VERSION = 'v31';  // Bidirectional pause search, prefer longest within ±2s
 const CACHE_NAMES = {
   app: `app-shell-${CACHE_VERSION}`,
   cdn: `cdn-assets-${CACHE_VERSION}`,

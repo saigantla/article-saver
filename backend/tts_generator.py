@@ -10,9 +10,11 @@ import time
 import logging
 import struct
 import re
+import json
 from pathlib import Path
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +254,55 @@ def estimate_audio_duration(audio_bytes: bytes) -> float:
     return duration
 
 
+def extract_word_timestamps(audio_path: Path) -> list[dict]:
+    """
+    Extract word-level timestamps from audio using faster-whisper
+
+    Args:
+        audio_path: Path to audio file
+
+    Returns:
+        List of dicts: [{"word": "Hello", "start": 0.0, "end": 0.5}, ...]
+    """
+    try:
+        from faster_whisper import WhisperModel
+
+        logger.info(f"Extracting word timestamps from {audio_path}")
+
+        # Use base model for balance of speed/accuracy
+        # Models: tiny, base, small, medium, large-v3
+        # base is ~140MB, processes ~10min of audio in ~30sec on CPU
+        model = WhisperModel("base.en", device="cpu", compute_type="int8")
+
+        # Transcribe with word timestamps
+        segments, info = model.transcribe(
+            str(audio_path),
+            word_timestamps=True,
+            language="en"
+        )
+
+        # Extract all words with timestamps
+        words = []
+        for segment in segments:
+            if segment.words:
+                for word in segment.words:
+                    words.append({
+                        "word": word.word.strip(),
+                        "start": word.start,
+                        "end": word.end
+                    })
+
+        logger.info(f"Extracted {len(words)} word timestamps")
+        return words
+
+    except ImportError:
+        logger.warning("faster-whisper not installed, skipping word timestamps")
+        return []
+    except Exception as e:
+        logger.error(f"Failed to extract word timestamps: {e}")
+        return []
+
+
 def generate_audio_for_article(article_id: int, html_content: str,
                                voice: str = DEFAULT_VOICE) -> dict:
     """
@@ -345,17 +396,40 @@ def generate_audio_for_article(article_id: int, html_content: str,
         duration = estimate_audio_duration(audio_bytes)
         size = len(audio_bytes)
 
+        # Extract word timestamps for perfect timing
+        word_timestamps = extract_word_timestamps(audio_path)
+
+        # Save metadata with word timestamps
+        metadata = {
+            "version": 1,
+            "article_id": article_id,
+            "generated_at": datetime.now().isoformat(),
+            "duration": duration,
+            "size": size,
+            "voice": voice,
+            "chunks": len(text_chunks),
+            "word_timestamps": word_timestamps,
+            "word_count": len(word_timestamps)
+        }
+
+        meta_path = AUDIO_DIR / f"{article_id}.meta.json"
+        with open(meta_path, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2)
+
+        logger.info(f"Article {article_id}: Metadata saved with {len(word_timestamps)} word timestamps")
+
         result.update({
             'success': True,
             'file_path': str(audio_path),
             'relative_path': f"audio/{audio_filename}",
             'duration': duration,
             'size': size,
-            'chunks': len(text_chunks)
+            'chunks': len(text_chunks),
+            'word_count': len(word_timestamps)
         })
 
         logger.info(f"Article {article_id}: Audio saved to {audio_path} "
-                   f"({size:,} bytes, {duration:.1f}s, {len(text_chunks)} chunks)")
+                   f"({size:,} bytes, {duration:.1f}s, {len(text_chunks)} chunks, {len(word_timestamps)} words)")
 
         return result
 
@@ -380,13 +454,21 @@ def audio_exists(article_id: int) -> bool:
 
 
 def delete_audio(article_id: int) -> bool:
-    """Delete audio file for an article"""
+    """Delete audio file and metadata for an article"""
     audio_path = get_audio_path(article_id)
+    meta_path = AUDIO_DIR / f"{article_id}.meta.json"
+
+    deleted = False
     if audio_path.exists():
         audio_path.unlink()
-        logger.info(f"Deleted audio for article {article_id}")
-        return True
-    return False
+        deleted = True
+    if meta_path.exists():
+        meta_path.unlink()
+        deleted = True
+
+    if deleted:
+        logger.info(f"Deleted audio and metadata for article {article_id}")
+    return deleted
 
 
 # For testing

@@ -1209,6 +1209,29 @@ def serve_audio(article_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/audio/<int:article_id>.meta.json', methods=['GET'])
+def serve_audio_metadata(article_id):
+    """Serve audio metadata with word timestamps for an article"""
+    try:
+        from pathlib import Path
+        import json
+
+        meta_path = Path(__file__).parent.parent / "audio" / f"{article_id}.meta.json"
+
+        if not meta_path.exists():
+            logger.warning(f"Audio metadata not found for article {article_id}")
+            return jsonify({"error": "Metadata not found"}), 404
+
+        with open(meta_path, 'r', encoding='utf-8') as f:
+            metadata = json.load(f)
+
+        return jsonify(metadata)
+
+    except Exception as e:
+        logger.exception(f"Error serving audio metadata for article {article_id}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/articles/<int:article_id>/audio', methods=['DELETE'])
 def delete_audio(article_id):
     """Delete audio file for an article"""

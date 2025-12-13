@@ -2044,102 +2044,183 @@
                 const duration = els.audio.duration;
                 if (!duration || !isFinite(duration) || !els.rContent) return;
 
-                // Get ALL significant text elements recursively (not just direct children)
+                // Get all text block elements
                 const selector = 'p, blockquote, h1, h2, h3, h4, h5, h6, ul, ol';
                 const allElements = els.rContent.querySelectorAll(selector);
-
-                // Filter to only elements with meaningful text content
-                const children = Array.from(allElements).filter(el => {
-                    return el.textContent.trim().length > 0;
-                });
+                const children = Array.from(allElements).filter(el =>
+                    el.textContent.trim().length > 0
+                );
 
                 if (children.length === 0) {
                     console.warn('No text elements found for reading map');
                     return;
                 }
 
-                // Calculate word-based heuristic estimates first
+                // Try to load word timestamps metadata
+                const id = state.currentArticleId;
+                let wordTimestamps = null;
+                try {
+                    const response = await fetch(`/audio/${id}.meta.json`);
+                    if (response.ok) {
+                        const metadata = await response.json();
+                        wordTimestamps = metadata.word_timestamps;
+                        console.log(`Loaded ${wordTimestamps.length} word timestamps from metadata`);
+                    }
+                } catch (err) {
+                    console.warn('Could not load word timestamps, using heuristic:', err);
+                }
+
+                // If we have word timestamps, use them for perfect alignment
+                if (wordTimestamps && wordTimestamps.length > 0) {
+                    // Step 1: Get timestamps from word-level data
+                    state.readingMap = app.mapElementsToWordTimestamps(children, wordTimestamps, duration);
+
+                    // Step 2: Detect pauses for refinement
+                    try {
+                        const pauses = await app.analyzeAudioForPauses();
+                        if (pauses && pauses.length > 0) {
+                            // Step 3: Snap paragraph starts to nearby pauses
+                            app.snapToNearbyPauses(state.readingMap, pauses);
+                        }
+                    } catch (err) {
+                        console.warn('Could not analyze pauses for refinement:', err);
+                    }
+
+                    console.log(`Reading map: ${state.readingMap.length} segments using word timestamps + pause refinement`);
+                    return;
+                }
+
+                // Fallback to word-based heuristic
                 let totalWeight = 0;
                 const items = children.map(child => {
                     const text = child.textContent.trim();
-
-                    // Count words (more accurate than characters for speech)
                     const wordCount = text.split(/\s+/).length;
-
-                    // Count sentence-ending punctuation (adds pauses in TTS)
                     const sentenceEnds = (text.match(/[.!?]+/g) || []).length;
-
-                    // Count commas/semicolons (shorter pauses)
                     const shortPauses = (text.match(/[,;:]/g) || []).length;
-
-                    // Weight: 1 per word + 3 extra for sentence ends + 1 for short pauses
                     const weight = wordCount + (sentenceEnds * 3) + shortPauses;
-
                     totalWeight += weight;
                     return { child, weight, wordCount, text };
                 });
 
-                // Calculate estimated segment boundaries using word weights
                 let currentTime = 0;
-                const heuristicBoundaries = [];
-                items.forEach((item, idx) => {
+                state.readingMap = items.map(item => {
                     const segmentDuration = (item.weight / totalWeight) * duration;
-                    heuristicBoundaries.push({
-                        idx: idx,
+                    const result = {
+                        el: item.child,
                         start: currentTime,
                         end: currentTime + segmentDuration
-                    });
+                    };
                     currentTime += segmentDuration;
+                    return result;
                 });
 
-                // Try to detect actual pauses in the audio
-                let detectedPauses = [];
-                try {
-                    detectedPauses = await app.analyzeAudioForPauses();
-                    console.log(`Detected ${detectedPauses.length} pauses in audio`);
-                } catch (err) {
-                    console.warn('Audio pause detection failed, using heuristic only:', err);
+                console.log(`Reading map: ${state.readingMap.length} segments using word heuristic (no timestamps)`);
+            },
+
+            mapElementsToWordTimestamps(elements, wordTimestamps, totalDuration) {
+                // Sequential approach with ratio adjustment to prevent drift
+                // If Whisper transcribed more/fewer words than original, distribute proportionally
+
+                const readingMap = [];
+
+                // First pass: count total words in original article
+                let totalOriginalWords = 0;
+                const elementWordCounts = [];
+
+                for (const el of elements) {
+                    const text = el.textContent.trim();
+                    const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
+                    elementWordCounts.push(wordCount);
+                    totalOriginalWords += wordCount;
                 }
 
-                // Hybrid approach: Use heuristic boundaries, but snap to nearby detected pauses
-                const snapTolerance = 0.75; // Look for pauses within ±0.75s of heuristic estimate
-                let snappedCount = 0;
-                let previousEnd = 0;
+                // Calculate ratio to account for Whisper having more/fewer words than original
+                const totalWhisperWords = wordTimestamps.length;
+                const ratio = totalWhisperWords / totalOriginalWords;
 
-                state.readingMap = items.map((item, idx) => {
-                    const heuristic = heuristicBoundaries[idx];
-                    let actualStart = previousEnd;
-                    let actualEnd = heuristic.end;
+                console.log(`Mapping ${elements.length} paragraphs:`);
+                console.log(`  Original article: ${totalOriginalWords} words`);
+                console.log(`  Whisper transcript: ${totalWhisperWords} words`);
+                console.log(`  Ratio: ${ratio.toFixed(4)} (${ratio > 1 ? 'Whisper has more' : 'Original has more'})`);
 
-                    // For the end boundary (start of next segment), try to snap to a detected pause
-                    if (idx < items.length - 1 && detectedPauses.length > 0) {
-                        // Find the nearest pause to our heuristic end time
-                        const nearbyPause = detectedPauses.find(pauseTime => {
-                            return Math.abs(pauseTime - heuristic.end) <= snapTolerance;
+                // Second pass: assign timestamps using ratio adjustment
+                let wordIndex = 0;
+
+                for (let i = 0; i < elements.length; i++) {
+                    const el = elements[i];
+                    const originalWordCount = elementWordCounts[i];
+
+                    if (originalWordCount === 0) continue;
+
+                    // Adjust word count by ratio to account for Whisper differences
+                    const adjustedWordCount = originalWordCount * ratio;
+
+                    // Calculate indices
+                    const startIdx = Math.floor(wordIndex);
+                    const endIdx = Math.min(
+                        Math.floor(wordIndex + adjustedWordCount) - 1,
+                        wordTimestamps.length - 1
+                    );
+
+                    if (startIdx < wordTimestamps.length && endIdx >= startIdx) {
+                        const startTime = wordTimestamps[startIdx].start;
+                        const endTime = wordTimestamps[endIdx].end;
+
+                        readingMap.push({
+                            el: el,
+                            start: startTime,
+                            end: endTime,
+                            type: 'word_timestamp',
+                            wordRange: [startIdx, endIdx],
+                            originalWords: originalWordCount,
+                            whisperWords: endIdx - startIdx + 1
                         });
 
-                        if (nearbyPause) {
-                            actualEnd = nearbyPause;
-                            snappedCount++;
+                        if (i < 5 || i >= elements.length - 3) {
+                            // Log first 5 and last 3 paragraphs
+                            console.log(`Para ${i+1}: words ${startIdx}-${endIdx} (${originalWordCount} orig → ${(endIdx-startIdx+1)} whisper), ${startTime.toFixed(1)}s - ${endTime.toFixed(1)}s`);
                         }
+
+                        // Move cursor forward by adjusted amount
+                        wordIndex += adjustedWordCount;
+                    } else {
+                        console.warn(`Para ${i+1}: index out of bounds (${startIdx}-${endIdx})`);
                     }
+                }
 
-                    // Last segment always ends at duration
-                    if (idx === items.length - 1) {
-                        actualEnd = duration;
-                    }
+                console.log(`Final position: ${Math.floor(wordIndex)}/${totalWhisperWords} (${((wordIndex/totalWhisperWords)*100).toFixed(1)}%)`);
 
-                    // Update previousEnd for next iteration
-                    previousEnd = actualEnd;
+                return readingMap;
+            },
 
-                    return {
-                        el: item.child,
-                        start: actualStart,
-                        end: actualEnd
-                    };
+            calculateReadingMapHeuristic(children, duration) {
+                // Original word-weight based calculation (keep as fallback)
+                let totalWeight = 0;
+                const items = children.map(child => {
+                    const text = child.textContent.trim();
+                    const wordCount = text.split(/\s+/).length;
+                    const sentenceEnds = (text.match(/[.!?]+/g) || []).length;
+                    const shortPauses = (text.match(/[,;:]/g) || []).length;
+                    const weight = wordCount + (sentenceEnds * 3) + shortPauses;
+                    totalWeight += weight;
+                    return { child, weight };
                 });
 
-                console.log(`Reading map created: ${state.readingMap.length} segments (${snappedCount} snapped to detected pauses, ${items.length - snappedCount} using heuristic)`);
+                let currentTime = 0;
+                const readingMap = items.map(item => {
+                    const segmentDuration = (item.weight / totalWeight) * duration;
+                    const result = {
+                        el: item.child,
+                        start: currentTime,
+                        end: currentTime + segmentDuration,
+                        type: 'heuristic'
+                    };
+                    currentTime += segmentDuration;
+                    return result;
+                });
+
+                console.log(`Reading map created: ${readingMap.length} segments using heuristic fallback`);
+                return readingMap;
             },
 
             async analyzeAudioForPauses() {
@@ -2162,7 +2243,7 @@
                 // Parameters for pause detection
                 const windowSize = Math.floor(sampleRate * 0.05); // 50ms windows
                 const silenceThreshold = 0.02; // Amplitude threshold for silence
-                const minPauseDuration = 0.3; // Minimum 300ms pause to detect (we'll filter by proximity later)
+                const minPauseDuration = 0.3; // Minimum 300ms pause to detect
 
                 const pauses = [];
                 let silenceStart = null;
@@ -2189,8 +2270,19 @@
                         if (silenceStart !== null) {
                             const pauseDuration = currentTime - silenceStart;
                             if (pauseDuration >= minPauseDuration) {
-                                // Found a significant pause - use the midpoint
-                                pauses.push(silenceStart + pauseDuration / 2);
+                                // Categorize pause by duration
+                                const pauseType =
+                                    pauseDuration >= 0.6 ? 'long' :    // Paragraph breaks
+                                    pauseDuration >= 0.35 ? 'medium' : // Sentence breaks
+                                    'short';                           // Clause breaks
+
+                                pauses.push({
+                                    time: silenceStart + pauseDuration / 2,
+                                    start: silenceStart,
+                                    end: currentTime,
+                                    duration: pauseDuration,
+                                    type: pauseType
+                                });
                             }
                             silenceStart = null;
                         }
@@ -2200,8 +2292,65 @@
                 // Close audio context to free resources
                 audioContext.close();
 
-                console.log(`Detected ${pauses.length} pauses in audio:`, pauses.map(p => p.toFixed(2) + 's'));
+                console.log(`Detected ${pauses.length} pauses: ` +
+                    `${pauses.filter(p => p.type === 'long').length} long, ` +
+                    `${pauses.filter(p => p.type === 'medium').length} medium, ` +
+                    `${pauses.filter(p => p.type === 'short').length} short`);
+
                 return pauses;
+            },
+
+            snapToNearbyPauses(readingMap, pauses) {
+                // Refine paragraph start times by snapping to nearby pauses
+                // Find the pause that naturally precedes this paragraph
+                // (the pause end should be close to where speech resumes)
+
+                const SNAP_TOLERANCE = 2.0; // Look within ±2 seconds
+                let snappedCount = 0;
+
+                for (const segment of readingMap) {
+                    const originalStart = segment.start;
+
+                    // Find pauses near this segment start
+                    // Looking for pause.end (when audio resumes) close to our estimate
+                    const candidatePauses = pauses.filter(pause => {
+                        const pauseEnd = pause.end;
+                        const distance = Math.abs(pauseEnd - originalStart);
+                        return distance <= SNAP_TOLERANCE;
+                    });
+
+                    if (candidatePauses.length > 0) {
+                        // Sort by: longest duration first, then closest to estimate
+                        candidatePauses.sort((a, b) => {
+                            // Strongly prefer longer pauses (paragraph breaks)
+                            const durationDiff = b.duration - a.duration;
+                            if (Math.abs(durationDiff) > 0.15) {
+                                return durationDiff;
+                            }
+                            // For similar duration, prefer closest
+                            const distA = Math.abs(a.end - originalStart);
+                            const distB = Math.abs(b.end - originalStart);
+                            return distA - distB;
+                        });
+
+                        const bestPause = candidatePauses[0];
+                        const snappedStart = bestPause.end; // Start right after the pause
+
+                        // Ensure we don't create overlaps or push past segment end
+                        if (snappedStart < segment.end) {
+                            const adjustment = snappedStart - originalStart;
+                            segment.start = snappedStart;
+                            snappedCount++;
+
+                            if (Math.abs(adjustment) > 0.1) {
+                                // Log significant adjustments
+                                console.log(`  Snapped para to ${snappedStart.toFixed(1)}s (${adjustment > 0 ? '+' : ''}${adjustment.toFixed(2)}s, ${bestPause.duration.toFixed(2)}s ${bestPause.type} pause)`);
+                            }
+                        }
+                    }
+                }
+
+                console.log(`Snapped ${snappedCount}/${readingMap.length} paragraph starts to nearby pauses`);
             },
 
             toggleAudioPlay() {
