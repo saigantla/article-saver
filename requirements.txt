@@ -7,5 +7,8 @@ beautifulsoup4==4.12.2
 # HTTP Requests
 requests==2.31.0
 
+# Speech Recognition (for word-level timestamps)
+faster-whisper==1.1.0
+
 # Production WSGI Server (optional, for deployment)
 gunicorn==21.2.0
