@@ -1125,9 +1125,16 @@
                 });
 
                 // Update counts
-                if (els.countAll) els.countAll.textContent = state.articles.length;
-                if (els.countUnread) els.countUnread.textContent = state.articles.filter(a => a.status !== 'read').length;
-                if (els.countRead) els.countRead.textContent = state.articles.filter(a => a.status === 'read').length;
+                const totalCount = state.articles.length;
+                const unreadCount = state.articles.filter(a => a.status !== 'read').length;
+                const readCount = state.articles.filter(a => a.status === 'read').length;
+
+                console.log(`Updating counts: total=${totalCount}, unread=${unreadCount}, read=${readCount}`);
+                console.log('Count elements:', { all: els.countAll, unread: els.countUnread, read: els.countRead });
+
+                if (els.countAll) els.countAll.textContent = totalCount;
+                if (els.countUnread) els.countUnread.textContent = unreadCount;
+                if (els.countRead) els.countRead.textContent = readCount;
             },
 
             // Drag & Drop
