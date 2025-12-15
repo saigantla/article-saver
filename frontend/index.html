@@ -306,7 +306,7 @@
                 <!-- Article Header -->
                 <header class="mb-12 border-b border-border pb-8">
                     <div class="flex flex-wrap items-center gap-3 mb-4 font-mono text-xs text-dim tracking-wider uppercase">
-                        <span id="reader-source" class="text-cyan">SOURCE</span>
+                        <a id="reader-source" class="text-cyan hover:text-white underline" href="#" target="_blank" rel="noopener noreferrer">SOURCE</a>
                         <span>//</span>
                         <span id="reader-author">AUTHOR</span>
                         <span class="mx-2">|</span>
@@ -1356,7 +1356,11 @@
 
                     // Populate reader (with sanitization)
                     if (els.rTitle) els.rTitle.textContent = article.title;
-                    if (els.rSource) els.rSource.textContent = utils.safeHostname(article.source || article.archive_url);
+                    if (els.rSource) {
+                        const sourceUrl = article.original_url || article.archive_url;
+                        els.rSource.textContent = utils.safeHostname(article.source || article.archive_url);
+                        els.rSource.href = sourceUrl || '#';
+                    }
                     if (els.rAuthor) els.rAuthor.textContent = article.author || 'UNKNOWN';
                     if (els.rDate) els.rDate.textContent = utils.formatDate(article.captured_at);
                     if (els.rTime) els.rTime.textContent = (article.readTime || '5m') + ' READ';
