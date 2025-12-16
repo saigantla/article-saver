@@ -1,7 +1,7 @@
 // Service Worker for Article Saver - Offline Support
 // Handles caching of app shell, CDN resources, and API responses
 
-const CACHE_VERSION = 'v40';  // FAB only shows in reader view, centered icons
+const CACHE_VERSION = 'v41';  // Add collapsible sidebar
 const CACHE_NAMES = {
   app: `app-shell-${CACHE_VERSION}`,
   cdn: `cdn-assets-${CACHE_VERSION}`,

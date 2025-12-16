@@ -185,11 +185,23 @@
     <div class="pt-16 min-h-screen flex max-w-[1600px] mx-auto w-full">
 
         <!-- SIDEBAR (Navigation & Groups) -->
-        <aside id="sidebar-panel" class="w-64 fixed lg:static top-16 bottom-0 left-0 bg-sidebar border-r border-border p-4 overflow-y-auto hidden lg:block z-30 transform transition-transform duration-300 -translate-x-full lg:translate-x-0">
+        <aside id="sidebar-panel" class="w-64 fixed lg:static top-16 bottom-0 left-0 bg-sidebar border-r border-border p-4 overflow-y-auto hidden lg:block z-30 transform transition-all duration-300 -translate-x-full lg:translate-x-0">
 
-            <div class="mb-8">
-                <h3 class="font-mono text-[10px] text-dim mb-2 tracking-wider">LIBRARY</h3>
-                <nav class="space-y-1">
+            <!-- Collapsed State Toggle -->
+            <button id="sidebar-expand-btn" class="hidden absolute top-4 left-1/2 -translate-x-1/2 text-dim hover:text-white transition-colors">
+                <i class="fa-solid fa-chevron-right text-sm"></i>
+            </button>
+
+            <!-- Sidebar Content -->
+            <div id="sidebar-content" class="transition-opacity duration-200">
+                <div class="mb-8">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="font-mono text-[10px] text-dim tracking-wider">LIBRARY</h3>
+                        <button id="sidebar-collapse-btn" class="text-dim hover:text-white transition-colors">
+                            <i class="fa-solid fa-chevron-left text-xs"></i>
+                        </button>
+                    </div>
+                    <nav class="space-y-1">
                     <button data-filter-status="all" class="sidebar-item w-full text-left px-3 py-2 text-sm font-mono text-dim rounded flex justify-between items-center group active" data-val="all">
                         <span>ALL DATA</span>
                         <span id="count-all" class="text-[10px] bg-obsidian px-1.5 py-0.5 rounded text-dim group-hover:text-white">0</span>
@@ -216,6 +228,7 @@
                 <div id="group-list" class="space-y-1">
                     <div class="text-center py-4 text-dim text-xs italic">Loading...</div>
                 </div>
+            </div>
             </div>
         </aside>
 
@@ -501,6 +514,7 @@
             selectionMode: false,
             selectedIds: new Set(),
             searchMode: 'client',  // 'client' or 'server'
+            sidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true',
             // Audio state
             audioUrl: null,
             isGeneratingAudio: false,
@@ -514,6 +528,9 @@
         const els = {
             // Sidebar
             sidebar: document.getElementById('sidebar-panel'),
+            sidebarContent: document.getElementById('sidebar-content'),
+            sidebarCollapseBtn: document.getElementById('sidebar-collapse-btn'),
+            sidebarExpandBtn: document.getElementById('sidebar-expand-btn'),
             groupList: document.getElementById('group-list'),
             countAll: document.getElementById('count-all'),
             countUnread: document.getElementById('count-unread'),
@@ -876,6 +893,14 @@
                     // Setup event listeners
                     app.setupEventListeners();
 
+                    // Initialize sidebar state
+                    if (state.sidebarCollapsed) {
+                        els.sidebar?.classList.remove('w-64');
+                        els.sidebar?.classList.add('w-12');
+                        els.sidebarContent?.classList.add('opacity-0', 'pointer-events-none');
+                        els.sidebarExpandBtn?.classList.remove('hidden');
+                    }
+
                     // Generate bookmarklet
                     app.generateBookmarklet();
 
@@ -896,6 +921,8 @@
                 document.getElementById('mobile-menu-btn')?.addEventListener('click', () => {
                     els.sidebar?.classList.toggle('-translate-x-full');
                 });
+                els.sidebarCollapseBtn?.addEventListener('click', () => app.toggleSidebar());
+                els.sidebarExpandBtn?.addEventListener('click', () => app.toggleSidebar());
                 document.getElementById('create-group-btn')?.addEventListener('click', () => app.createNewGroup());
 
                 document.querySelectorAll('[data-filter-status]').forEach(btn => {
@@ -1275,6 +1302,25 @@
                 if (els.countAll) els.countAll.textContent = totalCount;
                 if (els.countUnread) els.countUnread.textContent = unreadCount;
                 if (els.countRead) els.countRead.textContent = readCount;
+            },
+
+            toggleSidebar() {
+                state.sidebarCollapsed = !state.sidebarCollapsed;
+                localStorage.setItem('sidebarCollapsed', state.sidebarCollapsed);
+
+                if (state.sidebarCollapsed) {
+                    // Collapse sidebar
+                    els.sidebar?.classList.remove('w-64');
+                    els.sidebar?.classList.add('w-12');
+                    els.sidebarContent?.classList.add('opacity-0', 'pointer-events-none');
+                    els.sidebarExpandBtn?.classList.remove('hidden');
+                } else {
+                    // Expand sidebar
+                    els.sidebar?.classList.remove('w-12');
+                    els.sidebar?.classList.add('w-64');
+                    els.sidebarContent?.classList.remove('opacity-0', 'pointer-events-none');
+                    els.sidebarExpandBtn?.classList.add('hidden');
+                }
             },
 
             // Drag & Drop
