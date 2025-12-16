@@ -396,6 +396,42 @@
         <audio id="main-audio" class="hidden"></audio>
     </div>
 
+    <!-- FLOATING ACTION BUTTON -->
+    <div id="fab-container" class="hidden fixed bottom-8 right-8 z-[60] flex flex-col items-end pointer-events-none transition-transform duration-300">
+        <!-- Menu Items -->
+        <div id="fab-menu" class="flex flex-col space-y-3 items-end mb-4 transition-all duration-300 opacity-0 translate-y-4 pointer-events-none">
+
+            <!-- Share/Copy URL -->
+            <button id="fab-share" class="group flex items-center pointer-events-auto">
+                <span class="mr-3 text-[10px] font-mono bg-obsidian text-dim px-2 py-1 rounded border border-border shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">COPY URL</span>
+                <div class="w-10 h-10 rounded-full bg-cardbg border border-border text-dim shadow-lg flex items-center justify-center hover:border-cyan hover:text-cyan transition-all">
+                    <i class="fa-solid fa-share-nodes text-sm leading-none"></i>
+                </div>
+            </button>
+
+            <!-- Mark Read/Unread -->
+            <button id="fab-mark-read" class="group flex items-center pointer-events-auto">
+                <span id="fab-mark-read-label" class="mr-3 text-[10px] font-mono bg-obsidian text-dim px-2 py-1 rounded border border-border shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">MARK READ</span>
+                <div class="w-10 h-10 rounded-full bg-cardbg border border-border text-dim shadow-lg flex items-center justify-center hover:border-green-500 hover:text-green-500 transition-all">
+                    <i id="fab-mark-read-icon" class="fa-regular fa-circle-check text-sm leading-none"></i>
+                </div>
+            </button>
+
+            <!-- Scroll Top -->
+            <button id="fab-scroll-top" class="group flex items-center pointer-events-auto">
+                <span class="mr-3 text-[10px] font-mono bg-obsidian text-dim px-2 py-1 rounded border border-border shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">SCROLL TOP</span>
+                <div class="w-10 h-10 rounded-full bg-cardbg border border-border text-dim shadow-lg flex items-center justify-center hover:border-white hover:text-white transition-all">
+                    <i class="fa-solid fa-arrow-up text-sm leading-none"></i>
+                </div>
+            </button>
+        </div>
+
+        <!-- Main FAB Button -->
+        <button id="fab-main" class="w-14 h-14 rounded-full bg-cyan text-black shadow-[0_0_20px_rgba(0,243,255,0.4)] hover:shadow-[0_0_30px_rgba(0,243,255,0.6)] flex items-center justify-center text-xl transition-all duration-300 transform hover:scale-105 pointer-events-auto">
+            <i class="fa-solid fa-bars transition-transform duration-300" id="fab-icon"></i>
+        </button>
+    </div>
+
     <!-- MODAL: BOOKMARKLET -->
     <div id="modal-bookmarklet" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="bg-cardbg border border-border w-full max-w-2xl p-6 rounded shadow-2xl relative">
@@ -531,6 +567,17 @@
             audioCurrentTime: document.getElementById('audio-current-time'),
             audioDuration: document.getElementById('audio-duration'),
             btnGenerateAudio: document.getElementById('btn-generate-audio'),
+
+            // FAB
+            fabContainer: document.getElementById('fab-container'),
+            fabMain: document.getElementById('fab-main'),
+            fabMenu: document.getElementById('fab-menu'),
+            fabIcon: document.getElementById('fab-icon'),
+            fabShare: document.getElementById('fab-share'),
+            fabMarkRead: document.getElementById('fab-mark-read'),
+            fabMarkReadLabel: document.getElementById('fab-mark-read-label'),
+            fabMarkReadIcon: document.getElementById('fab-mark-read-icon'),
+            fabScrollTop: document.getElementById('fab-scroll-top'),
 
             // Modal
             bookmarkletModal: document.getElementById('modal-bookmarklet'),
@@ -767,6 +814,18 @@
                 alert(message);
             },
 
+            showSuccess(message) {
+                console.log(message);
+                // Simple toast notification - could enhance later
+                const toast = document.createElement('div');
+                toast.className = 'fixed top-20 right-8 bg-green-500 text-black px-4 py-2 rounded shadow-lg z-[70] font-mono text-xs';
+                toast.textContent = message;
+                document.body.appendChild(toast);
+                setTimeout(() => {
+                    toast.remove();
+                }, 2000);
+            },
+
             showLoading(container, message = 'Loading...') {
                 if (!container) return;
                 container.innerHTML = `
@@ -904,6 +963,14 @@
                     if (els.audioDuration) {
                         els.audioDuration.textContent = utils.formatTime(els.audio.duration);
                     }
+                });
+
+                // FAB (Floating Action Button)
+                els.fabMain?.addEventListener('click', () => app.toggleFab());
+                els.fabShare?.addEventListener('click', () => app.shareCopyUrl());
+                els.fabMarkRead?.addEventListener('click', () => app.fabToggleReadStatus());
+                els.fabScrollTop?.addEventListener('click', () => {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
                 });
 
                 // Parser dropdown
@@ -1479,6 +1546,8 @@
                         els.libraryView?.classList.add('hidden');
                         els.readerView?.classList.remove('hidden');
                         els.sidebar?.classList.add('hidden');
+                        // Show FAB
+                        els.fabContainer?.classList.remove('hidden');
                         window.scrollTo(0, 0);
                     }
 
@@ -1535,6 +1604,9 @@
                     // Set parser mode to user's preferred parser
                     app.setParser(state.currentParserMode);
 
+                    // Update FAB state
+                    app.updateFabState();
+
                 } catch (error) {
                     console.error('Error opening article:', error);
                     ui.showError("Error opening article: " + error.message);
@@ -1552,6 +1624,17 @@
                 if (els.audioBar) {
                     els.audioBar.classList.add('hidden', 'translate-y-full');
                     els.audioBar.classList.remove('translate-y-0');
+                }
+                // Hide FAB and reset position
+                if (els.fabContainer) {
+                    els.fabContainer.classList.add('hidden');
+                    els.fabContainer.classList.remove('-translate-y-24');
+                }
+                // Close FAB menu if open
+                if (els.fabMenu && els.fabIcon) {
+                    els.fabMenu.classList.add('opacity-0', 'translate-y-4', 'pointer-events-none');
+                    els.fabIcon.classList.remove('fa-xmark', 'rotate-90');
+                    els.fabIcon.classList.add('fa-bars');
                 }
                 if (els.audio) {
                     els.audio.pause();
@@ -1583,6 +1666,11 @@
                     if (state.currentArticleId === id && els.rMarkRead) {
                         els.rMarkRead.textContent = markAsRead ? "MARK UNREAD" : "MARK READ";
                         els.rMarkRead.onclick = () => app.toggleReadStatus(id, !markAsRead);
+                    }
+
+                    // Update FAB state
+                    if (state.currentArticleId === id) {
+                        app.updateFabState();
                     }
 
                     try {
@@ -2063,6 +2151,10 @@
                     els.audioBar.classList.add('hidden', 'translate-y-full');
                     els.audioBar.classList.remove('translate-y-0');
                 }
+                // Reset FAB position
+                if (els.fabContainer) {
+                    els.fabContainer.classList.remove('-translate-y-24');
+                }
                 if (els.audio) {
                     els.audio.pause();
                     els.audio.src = '';
@@ -2114,6 +2206,10 @@
                         els.audioBar.classList.remove('hidden', 'translate-y-full');
                         els.audioBar.classList.add('translate-y-0');
                     }
+                    // Shift FAB up
+                    if (els.fabContainer) {
+                        els.fabContainer.classList.add('-translate-y-24');
+                    }
                     // Enable audio mode
                     if (els.rContent) {
                         els.rContent.parentElement.classList.add('audio-mode');
@@ -2162,6 +2258,11 @@
                         if (els.audioBar) {
                             els.audioBar.classList.remove('hidden', 'translate-y-full');
                             els.audioBar.classList.add('translate-y-0');
+                        }
+
+                        // Shift FAB up
+                        if (els.fabContainer) {
+                            els.fabContainer.classList.add('-translate-y-24');
                         }
 
                         // Enable audio mode styles
@@ -2660,6 +2761,64 @@
 
             closeBookmarkletModal() {
                 els.bookmarkletModal?.classList.add('hidden');
+            },
+
+            // FAB Functions
+            toggleFab() {
+                if (!els.fabMenu || !els.fabIcon) return;
+
+                if (els.fabMenu.classList.contains('opacity-0')) {
+                    // Open menu
+                    els.fabMenu.classList.remove('opacity-0', 'translate-y-4', 'pointer-events-none');
+                    els.fabIcon.classList.remove('fa-bars');
+                    els.fabIcon.classList.add('fa-xmark', 'rotate-90');
+                } else {
+                    // Close menu
+                    els.fabMenu.classList.add('opacity-0', 'translate-y-4', 'pointer-events-none');
+                    els.fabIcon.classList.remove('fa-xmark', 'rotate-90');
+                    els.fabIcon.classList.add('fa-bars');
+                }
+            },
+
+            async shareCopyUrl() {
+                const article = state.articles.find(a => a.id === state.currentArticleId);
+                if (!article) return;
+
+                const url = article.original_url || article.archive_url || window.location.href;
+
+                try {
+                    await navigator.clipboard.writeText(url);
+                    ui.showSuccess('URL copied to clipboard!');
+                } catch (err) {
+                    console.error('Failed to copy:', err);
+                    ui.showError('Failed to copy URL');
+                }
+            },
+
+            fabToggleReadStatus() {
+                const article = state.articles.find(a => a.id === state.currentArticleId);
+                if (!article) return;
+
+                const isRead = article.status === 'read';
+                app.toggleReadStatus(state.currentArticleId, !isRead);
+            },
+
+            updateFabState() {
+                // Update FAB mark read button based on current article status
+                const article = state.articles.find(a => a.id === state.currentArticleId);
+                if (!article || !els.fabMarkReadLabel || !els.fabMarkReadIcon) return;
+
+                const isRead = article.status === 'read';
+
+                if (isRead) {
+                    els.fabMarkReadLabel.textContent = 'MARK UNREAD';
+                    els.fabMarkReadIcon.classList.remove('fa-regular');
+                    els.fabMarkReadIcon.classList.add('fa-solid');
+                } else {
+                    els.fabMarkReadLabel.textContent = 'MARK READ';
+                    els.fabMarkReadIcon.classList.remove('fa-solid');
+                    els.fabMarkReadIcon.classList.add('fa-regular');
+                }
             },
 
             generateBookmarklet() {
