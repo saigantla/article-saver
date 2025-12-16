@@ -240,6 +240,20 @@
                             <span>SELECT</span>
                         </button>
 
+                        <!-- Sort Dropdown -->
+                        <div class="relative">
+                            <button id="sort-btn" class="text-xs font-mono border border-border px-3 py-1.5 rounded text-dim hover:text-white hover:border-white transition-colors flex items-center space-x-2">
+                                <i class="fa-solid fa-arrow-down-wide-short"></i>
+                                <span>SORT</span>
+                            </button>
+                            <div id="sort-menu" class="hidden absolute top-full mt-2 right-0 bg-cardbg border border-border rounded shadow-lg z-50 min-w-[180px]">
+                                <button data-sort="date" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">DATE ADDED ↓</button>
+                                <button data-sort="title" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">TITLE A-Z</button>
+                                <button data-sort="publisher" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">PUBLISHER A-Z</button>
+                                <button data-sort="length" class="block w-full text-left px-4 py-2 text-xs font-mono text-dim hover:text-cyan hover:bg-obsidian">LENGTH ↓</button>
+                            </div>
+                        </div>
+
                         <div id="selection-actions" class="hidden flex items-center space-x-2 animate-pulse">
                             <span class="text-xs font-mono text-cyan"><span id="selected-count">0</span> SELECTED</span>
                             <span class="text-[10px] text-dim hidden sm:inline">(DRAG TO GROUP)</span>
@@ -439,6 +453,7 @@
                 topic: 'all',
                 search: ''
             },
+            sortBy: 'date',  // 'date', 'title', 'publisher', 'length'
             reprocessTriggered: new Set(),
             customGroups: [],
             draggingIds: [],
@@ -477,6 +492,10 @@
             selectBtn: document.getElementById('select-mode-btn'),
             selectionActions: document.getElementById('selection-actions'),
             selectedCount: document.getElementById('selected-count'),
+
+            // Sort
+            sortBtn: document.getElementById('sort-btn'),
+            sortMenu: document.getElementById('sort-menu'),
 
             // Search
             searchInput: document.getElementById('search-input'),
@@ -816,6 +835,31 @@
                 // Selection
                 document.getElementById('select-mode-btn')?.addEventListener('click', () => app.toggleSelectionMode());
 
+                // Sort
+                if (els.sortBtn && els.sortMenu) {
+                    // Toggle sort menu
+                    els.sortBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        els.sortMenu.classList.toggle('hidden');
+                    });
+
+                    // Close menu when clicking outside
+                    document.addEventListener('click', (e) => {
+                        if (!els.sortBtn.contains(e.target) && !els.sortMenu.contains(e.target)) {
+                            els.sortMenu.classList.add('hidden');
+                        }
+                    });
+
+                    // Sort option click
+                    els.sortMenu.querySelectorAll('[data-sort]').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            const sortType = e.target.dataset.sort;
+                            app.setSortBy(sortType);
+                            els.sortMenu.classList.add('hidden');
+                        });
+                    });
+                }
+
                 // Search
                 if (els.searchInput) {
                     const debouncedSearch = utils.debounce((value) => {
@@ -967,6 +1011,11 @@
                     els.sidebar.classList.add('-translate-x-full');
                 }
 
+                app.renderLibrary();
+            },
+
+            setSortBy(sortType) {
+                state.sortBy = sortType;
                 app.renderLibrary();
             },
 
@@ -1216,14 +1265,40 @@
                 if (!els.articleList) return;
 
                 const filtered = app.getFilteredArticles();
+
+                // Sort articles based on current sortBy
+                let sortedArticles = [...filtered];
+                switch (state.sortBy) {
+                    case 'date':
+                        sortedArticles.sort((a, b) => new Date(b.captured_at) - new Date(a.captured_at));
+                        break;
+                    case 'title':
+                        sortedArticles.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+                        break;
+                    case 'publisher':
+                        sortedArticles.sort((a, b) => {
+                            const domainA = utils.safeHostname(a.source || a.archive_url);
+                            const domainB = utils.safeHostname(b.source || b.archive_url);
+                            return domainA.localeCompare(domainB);
+                        });
+                        break;
+                    case 'length':
+                        sortedArticles.sort((a, b) => {
+                            const timeA = parseInt((a.readTime || a.read_time || '0').toString().replace(/\D/g, '')) || 0;
+                            const timeB = parseInt((b.readTime || b.read_time || '0').toString().replace(/\D/g, '')) || 0;
+                            return timeB - timeA;
+                        });
+                        break;
+                }
+
                 els.articleList.innerHTML = '';
 
-                if (filtered.length === 0) {
+                if (sortedArticles.length === 0) {
                     ui.showEmpty(els.articleList);
                     return;
                 }
 
-                filtered.forEach(article => {
+                sortedArticles.forEach(article => {
                     const isRead = article.status === 'read';
                     const isSelected = state.selectedIds.has(article.id);
 
