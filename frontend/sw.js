@@ -1,7 +1,7 @@
 // Service Worker for Article Saver - Offline Support
 // Handles caching of app shell, CDN resources, and API responses
 
-const CACHE_VERSION = 'v36';  // Fix MODE dropdown hover gap issue
+const CACHE_VERSION = 'v38';  // Add time displays to audio player
 const CACHE_NAMES = {
   app: `app-shell-${CACHE_VERSION}`,
   cdn: `cdn-assets-${CACHE_VERSION}`,

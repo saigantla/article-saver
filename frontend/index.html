@@ -381,6 +381,11 @@
             </div>
 
             <div class="flex items-center space-x-4">
+                <div class="font-mono text-xs text-dim">
+                    <span id="audio-current-time">0:00</span>
+                    <span class="text-dim/50"> / </span>
+                    <span id="audio-duration">0:00</span>
+                </div>
                 <button id="audio-speed-btn" class="font-mono text-xs text-white hover:text-cyan transition-all px-2 py-1">
                     <span id="audio-speed-display">1.0x</span>
                 </button>
@@ -523,6 +528,8 @@
             audioStatusText: document.getElementById('audio-status-text'),
             audioSpeedBtn: document.getElementById('audio-speed-btn'),
             audioSpeedDisplay: document.getElementById('audio-speed-display'),
+            audioCurrentTime: document.getElementById('audio-current-time'),
+            audioDuration: document.getElementById('audio-duration'),
             btnGenerateAudio: document.getElementById('btn-generate-audio'),
 
             // Modal
@@ -560,6 +567,13 @@
                     console.error('Date formatting error:', e);
                     return 'INVALID DATE';
                 }
+            },
+
+            formatTime(seconds) {
+                if (!seconds || !isFinite(seconds)) return '0:00';
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
             },
 
             safeHostname(urlStr) {
@@ -886,6 +900,11 @@
                 els.audioProgressBar?.addEventListener('click', (e) => app.seekAudio(e));
                 els.audio?.addEventListener('timeupdate', () => app.updateAudioProgress());
                 els.audio?.addEventListener('ended', () => app.onAudioEnded());
+                els.audio?.addEventListener('loadedmetadata', () => {
+                    if (els.audioDuration) {
+                        els.audioDuration.textContent = utils.formatTime(els.audio.duration);
+                    }
+                });
 
                 // Parser dropdown
                 document.querySelectorAll('[data-parser]').forEach(btn => {
@@ -987,6 +1006,11 @@
 
             // Filters
             setFilter(type, val) {
+                // Close reader if open
+                if (state.currentArticleId) {
+                    app.goHome();
+                }
+
                 if (type === 'status') {
                     state.filters.topic = 'all';
                     state.filters.status = val;
@@ -2540,6 +2564,11 @@
                 // Update progress bar
                 const percent = (els.audio.currentTime / els.audio.duration) * 100;
                 els.audioProgress.style.width = `${percent}%`;
+
+                // Update time display
+                if (els.audioCurrentTime) {
+                    els.audioCurrentTime.textContent = utils.formatTime(els.audio.currentTime);
+                }
 
                 // Update karaoke-style highlighting
                 const now = els.audio.currentTime;
