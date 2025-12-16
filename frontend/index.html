@@ -1414,6 +1414,51 @@
             // Reader
             async openReader(id) {
                 try {
+                    // Get cached article metadata from list (instant)
+                    const cachedArticle = state.articles.find(a => a.id === id);
+
+                    if (cachedArticle) {
+                        // Immediately populate reader with cached metadata
+                        state.currentArticleId = id;
+
+                        if (els.rTitle) els.rTitle.textContent = cachedArticle.title;
+                        if (els.rSource) {
+                            const sourceUrl = cachedArticle.original_url || cachedArticle.archive_url;
+                            els.rSource.textContent = utils.safeHostname(cachedArticle.source || cachedArticle.archive_url);
+                            els.rSource.href = sourceUrl || '#';
+                        }
+                        if (els.rAuthor) els.rAuthor.textContent = cachedArticle.author || 'UNKNOWN';
+                        if (els.rDate) els.rDate.textContent = utils.formatDate(cachedArticle.captured_at);
+                        if (els.rTime) els.rTime.textContent = (cachedArticle.readTime || '5m') + ' READ';
+
+                        // Tags
+                        if (els.rTags) {
+                            const tagsHtml = (cachedArticle.topics || [])
+                                .map(t => `<span class="tag-pill ml-2">${utils.escapeHtml(t.toUpperCase())}</span>`)
+                                .join('');
+                            els.rTags.innerHTML = tagsHtml;
+                        }
+
+                        // Mark read button
+                        const isRead = cachedArticle.status === 'read';
+                        if (els.rMarkRead) {
+                            els.rMarkRead.textContent = isRead ? "MARK UNREAD" : "MARK READ";
+                            els.rMarkRead.onclick = () => app.toggleReadStatus(id, !isRead);
+                        }
+
+                        // Show loading state for content
+                        if (els.rContent) {
+                            els.rContent.innerHTML = '<div class="flex items-center justify-center py-12"><div class="animate-pulse text-dim text-sm font-mono">LOADING CONTENT...</div></div>';
+                        }
+
+                        // Show reader view immediately
+                        els.libraryView?.classList.add('hidden');
+                        els.readerView?.classList.remove('hidden');
+                        els.sidebar?.classList.add('hidden');
+                        window.scrollTo(0, 0);
+                    }
+
+                    // Fetch full article content (async)
                     const article = await api.getArticle(id);
 
                     // Cache article
@@ -1425,11 +1470,10 @@
                         }
                     }
 
-                    state.currentArticleId = id;
                     state.parserResults = article.parser_results || {};
                     state.reprocessTriggered.clear();
 
-                    // Populate reader (with sanitization)
+                    // Update with full article data (may have more recent info)
                     if (els.rTitle) els.rTitle.textContent = article.title;
                     if (els.rSource) {
                         const sourceUrl = article.original_url || article.archive_url;
@@ -1454,7 +1498,7 @@
                         els.rTags.innerHTML = tagsHtml;
                     }
 
-                    // Mark read button
+                    // Mark read button (update in case status changed)
                     const isRead = article.status === 'read';
                     if (els.rMarkRead) {
                         els.rMarkRead.textContent = isRead ? "MARK UNREAD" : "MARK READ";
@@ -1466,12 +1510,6 @@
 
                     // Set parser mode
                     app.setParser('readability');
-
-                    // Show reader view
-                    els.libraryView?.classList.add('hidden');
-                    els.readerView?.classList.remove('hidden');
-                    els.sidebar?.classList.add('hidden');
-                    window.scrollTo(0, 0);
 
                 } catch (error) {
                     console.error('Error opening article:', error);
