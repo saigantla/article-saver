@@ -446,7 +446,7 @@
             articles: [],
             searchResults: [],  // Results from server-side search
             currentArticleId: null,
-            currentParserMode: 'readability',
+            currentParserMode: localStorage.getItem('preferredParser') || 'readability',
             parserResults: null,
             filters: {
                 status: 'all',
@@ -1508,8 +1508,8 @@
                     // Setup audio player
                     app.setupAudio(article);
 
-                    // Set parser mode
-                    app.setParser('readability');
+                    // Set parser mode to user's preferred parser
+                    app.setParser(state.currentParserMode);
 
                 } catch (error) {
                     console.error('Error opening article:', error);
@@ -1575,6 +1575,7 @@
 
             async setParser(mode) {
                 state.currentParserMode = mode;
+                localStorage.setItem('preferredParser', mode);
 
                 if (els.currentParserLabel) {
                     els.currentParserLabel.textContent = `MODE: ${mode.toUpperCase()}`;
